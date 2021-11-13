@@ -6,6 +6,8 @@ authors = ["Leigh Pauls <leigh@nextdoor.com>"]
 
 [tool.poetry.dependencies]
 python = "^3.8"
+black = "^21.10b0"
+isort = "^5.10.1"
 
 [tool.poetry.dev-dependencies]
 
