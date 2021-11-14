@@ -16,6 +16,31 @@ class CommitNode:
         self.commit = commit
         self.children = []
 
+    def print_tree(self) -> None:
+        self._print_children(1)
+        self._print_splits(0, len(self.children))
+        self._print_self(0)
+        print(":")
+
+    def _print_tree(self, indent: int) -> None:
+        self._print_children(indent)
+        self._print_splits(indent, len(self.children) - 1)
+        self._print_self(indent)
+
+    def _print_children(self, indent: int) -> None:
+        for i, child in enumerate(self.children):
+            child._print_tree(indent + i)
+
+    def _print_splits(self, indent: int, num_splits: int) -> None:
+        for i in range(indent + num_splits, indent, -1):
+            bars = "| " * (i - 1)
+            print(f"{bars}|/")
+
+    def _print_self(self, indent: int) -> None:
+        bars = "| " * indent
+        short_message = self.commit.message.split("\n", 1)[0]
+        print(f"{bars}* {self.commit.hexsha[:8]} {short_message}")
+
 
 def main() -> None:
     times = [time.time()]
@@ -60,7 +85,10 @@ def main() -> None:
         commit_nodes[bc.hexsha] = CommitNode(bc)
 
     # link the node objects
-    trunk_nodes: Dict[str, CommitNode] = {}
+    trunk_branch_commit = repo.commit(trunk_branch)
+    trunk_nodes: Dict[str, CommitNode] = {
+        trunk_branch_commit.hexsha: CommitNode(trunk_branch_commit)
+    }
     for node in commit_nodes.values():
         parent_commit = node.commit.parents[0]
         parent_sha = parent_commit.hexsha
@@ -74,9 +102,18 @@ def main() -> None:
 
     times.append(time.time())
 
-    print("times:", [times[i] - times[i - 1] for i in range(1, len(times))])
+    ordered_tree = sorted(
+        trunk_nodes.values(), key=lambda n: n.commit.committed_datetime, reverse=True
+    )
 
-    pprint(trunk_nodes)
+    times.append(time.time())
+
+    for node in ordered_tree:
+        node.print_tree()
+
+    times.append(time.time())
+
+    print("times:", [times[i] - times[i - 1] for i in range(1, len(times))])
 
 
 if __name__ == "__main__":
