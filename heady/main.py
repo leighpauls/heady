@@ -1,8 +1,8 @@
 import datetime
-import time
+import pathlib
 from dataclasses import dataclass
 from pprint import pprint
-from typing import Dict, List
+from typing import Dict, List, Set
 
 import git
 
@@ -39,20 +39,86 @@ class CommitNode:
     def _print_self(self, indent: int) -> None:
         bars = "| " * indent
         short_message = self.commit.message.split("\n", 1)[0]
-        print(f"{bars}* {self.commit.hexsha[:8]} {short_message}")
+        dot_char = "@" if self.commit.repo.head.commit == self.commit else "*"
+        print(f"{bars}{dot_char} {self.commit.hexsha[:8]} {short_message}")
+
+
+@dataclass
+class HeadyTree:
+    commit_nodes: Dict[str, CommitNode]
+    trunk_nodes: List[CommitNode]
+
+
+@dataclass
+class HeadyRepo:
+    trunk_ref: str
+    repo: git.Repo
 
 
 def main() -> None:
-    times = [time.time()]
-    trunk_branch = "origin/main"
-    repo = git.Repo("/Users/leigh/src/nextdoor.com")
-    reflog: git.RefLog = repo.head.log()
-    times.append(time.time())
+    r = HeadyRepo("origin/main", git.Repo("/Users/leigh/src/nextdoor.com"))
+    print_tips_tree(r)
+    hide_subtree(r, "c36b61d4")
 
+
+def hide_subtree(r: HeadyRepo, hide_root_ref: str) -> None:
+    # Raises if the hide root doesn't exist
+    hide_root_commit = r.repo.commit(hide_root_ref)
+
+    # Verify that we are not attempting to hide a commit in trunk
+    if is_ancestor(r, hide_root_ref, r.trunk_ref):
+        raise ValueError(
+            f"Can not hide {hide_root_ref} because it would hide {r.trunk_ref}"
+        )
+
+    if is_ancestor(r, hide_root_ref, "HEAD"):
+        raise ValueError(f"Can not hide {hide_root_ref} because it would hide HEAD")
+
+    # Find all the child nodes in the tree to hide
+    tree = build_tree(r)
+    hide_root_sha = hide_root_commit.hexsha
+    if hide_root_sha not in tree.commit_nodes:
+        raise ValueError(f"Did not find {hide_root_sha} in the visible tree")
+
+    existing_hidden_tips = get_hide_list()
+    new_hidden_shas = []
+    for new_hide_sha in collect_subtree_shas(tree.commit_nodes[hide_root_sha]):
+        if new_hide_sha not in existing_hidden_tips:
+            new_hidden_shas.append(new_hide_sha)
+
+    with ensure_hide_list_file().open("a") as f:
+        for sha in new_hidden_shas:
+            f.write(f"{sha}\n")
+
+
+def collect_subtree_shas(node: CommitNode) -> List[str]:
+    result = [node.commit.hexsha]
+    for child in node.children:
+        result.extend(collect_subtree_shas(child))
+    return result
+
+
+def is_ancestor(r: HeadyRepo, ancestor_ref: str, descendent_ref: str):
+    # If all commits of ancestor_ref exist in descendent_ref, it must be an ancestor
+    missing_lineage = list(
+        r.repo.iter_commits(f"{descendent_ref}..{ancestor_ref}", max_count=1)
+    )
+    return len(missing_lineage) == 0
+
+
+def print_tips_tree(r: HeadyRepo) -> None:
+    tree = build_tree(r)
+
+    for node in tree.trunk_nodes:
+        node.print_tree()
+
+
+def build_tree(r: HeadyRepo) -> HeadyTree:
+    reflog: git.RefLog = r.repo.head.log()
     cur_time = datetime.datetime.now()
     max_age = datetime.timedelta(days=14)
 
-    tips = []
+    hide_list_shas = get_hide_list()
     tip_shas = set()
 
     item: git.RefLogEntry
@@ -62,22 +128,19 @@ def main() -> None:
         age = cur_time - item_time
         if age > max_age:
             break
-        tips.append(item)
-        tip_shas.add(item.newhexsha)
-    pprint(len(tip_shas))
-    times.append(time.time())
+        item_sha = item.newhexsha
+        if item_sha not in hide_list_shas:
+            tip_shas.add(item_sha)
 
-    rev_list_cmds = list(tip_shas) + [f"^{trunk_branch}"]
-    branch_commit_shas = set(repo.git.rev_list(*rev_list_cmds).split("\n"))
-    print("branch commits: ", len(branch_commit_shas))
+    # Find ancestors of tips which are not ancestors of trunk
+    rev_list_cmds = list(tip_shas) + [f"^{r.trunk_ref}"]
+    branch_commit_shas = set(r.repo.git.rev_list(*rev_list_cmds).split("\n"))
 
-    times.append(time.time())
+    root_sha = r.repo.merge_base(*list(branch_commit_shas), r.trunk_ref)
 
-    root_sha = repo.merge_base(*list(branch_commit_shas), trunk_branch)
-    print("root sha", root_sha)
-    times.append(time.time())
-
-    branch_commits: List[git.Commit] = [repo.commit(sha) for sha in branch_commit_shas]
+    branch_commits: List[git.Commit] = [
+        r.repo.commit(sha) for sha in branch_commit_shas
+    ]
 
     # build the node objects
     commit_nodes: Dict[str, CommitNode] = {}
@@ -85,7 +148,7 @@ def main() -> None:
         commit_nodes[bc.hexsha] = CommitNode(bc)
 
     # link the node objects
-    trunk_branch_commit = repo.commit(trunk_branch)
+    trunk_branch_commit = r.repo.commit(r.trunk_ref)
     trunk_nodes: Dict[str, CommitNode] = {
         trunk_branch_commit.hexsha: CommitNode(trunk_branch_commit)
     }
@@ -98,22 +161,32 @@ def main() -> None:
             trunk_nodes[parent_sha].children.append(node)
         else:
             commit_nodes[parent_sha].children.append(node)
-    print(len(trunk_nodes))
-
-    times.append(time.time())
 
     ordered_tree = sorted(
         trunk_nodes.values(), key=lambda n: n.commit.committed_datetime, reverse=True
     )
+    return HeadyTree(commit_nodes, ordered_tree)
 
-    times.append(time.time())
 
-    for node in ordered_tree:
-        node.print_tree()
+def ensure_config_directory() -> pathlib.Path:
+    config_dir = pathlib.Path.home().joinpath("Library", "Application Support", "heady")
+    config_dir.mkdir(parents=True, exist_ok=True)
+    return config_dir
 
-    times.append(time.time())
 
-    print("times:", [times[i] - times[i - 1] for i in range(1, len(times))])
+def ensure_hide_list_file() -> pathlib.Path:
+    p = ensure_config_directory().joinpath("hidelist")
+    if not p.exists():
+        p.touch()
+    return p
+
+
+def get_hide_list() -> Set[str]:
+    res = set()
+    with ensure_hide_list_file().open("r") as f:
+        for line in f.readlines():
+            res.add(line.strip())
+    return res
 
 
 if __name__ == "__main__":
