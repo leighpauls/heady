@@ -1,64 +1,62 @@
-import datetime
-from dataclasses import dataclass
-from typing import Dict, List, Set
+import argparse
+import pathlib
 
 import git
 
-from heady import config
-
-
-@dataclass
-class HeadyRepo:
-    trunk_ref: str
-    repo: git.Repo
-
-
-@dataclass
-class CommitNode:
-    commit: git.Commit
-    children: List["CommitNode"]
-
-    def __init__(self, commit: git.Commit):
-        self.commit = commit
-        self.children = []
-
-    def print_tree(self) -> None:
-        self._print_children(1)
-        self._print_splits(0, len(self.children))
-        self._print_self(0)
-        print(":")
-
-    def _print_tree(self, indent: int) -> None:
-        self._print_children(indent)
-        self._print_splits(indent, len(self.children) - 1)
-        self._print_self(indent)
-
-    def _print_children(self, indent: int) -> None:
-        for i, child in enumerate(self.children):
-            child._print_tree(indent + i)
-
-    def _print_splits(self, indent: int, num_splits: int) -> None:
-        for i in range(indent + num_splits, indent, -1):
-            bars = "| " * (i - 1)
-            print(f"{bars}|/")
-
-    def _print_self(self, indent: int) -> None:
-        bars = "| " * indent
-        short_message = self.commit.message.split("\n", 1)[0]
-        dot_char = "@" if self.commit.repo.head.commit == self.commit else "*"
-        print(f"{bars}{dot_char} {self.commit.hexsha[:8]} {short_message}")
-
-
-@dataclass
-class HeadyTree:
-    commit_nodes: Dict[str, CommitNode]
-    trunk_nodes: List[CommitNode]
+from heady import config, tree
+from heady.repo import HeadyRepo
 
 
 def main() -> None:
-    r = HeadyRepo("origin/main", git.Repo("/Users/leigh/src/nextdoor.com"))
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--repo",
+        default=None,
+        help="Location of the repo. Will use cwd if not provided.",
+    )
+    parser.add_argument(
+        "--trunk",
+        default="origin/main",
+        help="Trunk reference. Usually origin/main or origin/master",
+    )
+
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    tree_parser = subparsers.add_parser("tree", help="Show the tree of visible heads.")
+    tree_parser.set_defaults(func=tree_cmd)
+
+    hide_parser = subparsers.add_parser(
+        "hide", help="Hide the subtree from this revision"
+    )
+    hide_parser.add_argument("rev", type=str)
+    hide_parser.set_defaults(func=hide_cmd)
+
+    args = parser.parse_args()
+
+    original_repo_path = (
+        pathlib.Path(args.repo).expanduser().resolve()
+        if args.repo
+        else pathlib.Path.cwd()
+    )
+    repo_path = original_repo_path
+
+    while True:
+        if repo_path.is_dir() and repo_path.joinpath(".git").exists():
+            break
+        if repo_path.parent == repo_path:
+            raise ValueError(f"No git repo present in {original_repo_path}")
+        repo_path = repo_path.parent
+
+    r = HeadyRepo(args.trunk, git.Repo(repo_path))
+
+    args.func(r, args)
+
+
+def tree_cmd(r: HeadyRepo, _args: argparse.Namespace) -> None:
     print_tips_tree(r)
-    hide_subtree(r, "c36b61d4")
+
+
+def hide_cmd(r: HeadyRepo, args: argparse.Namespace) -> None:
+    hide_subtree(r, args.rev)
 
 
 def hide_subtree(r: HeadyRepo, hide_root_ref: str) -> None:
@@ -75,25 +73,18 @@ def hide_subtree(r: HeadyRepo, hide_root_ref: str) -> None:
         raise ValueError(f"Can not hide {hide_root_ref} because it would hide HEAD")
 
     # Find all the child nodes in the tree to hide
-    tree = build_tree(r)
+    t = tree.build_tree(r)
     hide_root_sha = hide_root_commit.hexsha
-    if hide_root_sha not in tree.commit_nodes:
+    if hide_root_sha not in t.commit_nodes:
         raise ValueError(f"Did not find {hide_root_sha} in the visible tree")
 
     existing_hidden_tips = config.get_hide_list(r.repo)
     new_hidden_shas = []
-    for new_hide_sha in collect_subtree_shas(tree.commit_nodes[hide_root_sha]):
+    for new_hide_sha in tree.collect_subtree_shas(t.commit_nodes[hide_root_sha]):
         if new_hide_sha not in existing_hidden_tips:
             new_hidden_shas.append(new_hide_sha)
 
     config.append_to_hide_list(r.repo, new_hidden_shas)
-
-
-def collect_subtree_shas(node: CommitNode) -> List[str]:
-    result = [node.commit.hexsha]
-    for child in node.children:
-        result.extend(collect_subtree_shas(child))
-    return result
 
 
 def is_ancestor(r: HeadyRepo, ancestor_ref: str, descendent_ref: str):
@@ -105,63 +96,10 @@ def is_ancestor(r: HeadyRepo, ancestor_ref: str, descendent_ref: str):
 
 
 def print_tips_tree(r: HeadyRepo) -> None:
-    tree = build_tree(r)
+    t = tree.build_tree(r)
 
-    for node in tree.trunk_nodes:
+    for node in t.trunk_nodes:
         node.print_tree()
-
-
-def build_tree(r: HeadyRepo) -> HeadyTree:
-    reflog: git.RefLog = r.repo.head.log()
-    cur_time = datetime.datetime.now()
-    max_age = datetime.timedelta(days=14)
-
-    hide_list_shas = config.get_hide_list(r.repo)
-    tip_shas = set()
-
-    item: git.RefLogEntry
-    for item in reversed(reflog):
-        time_seconds, _offset = item.time
-        item_time = datetime.datetime.fromtimestamp(time_seconds)
-        age = cur_time - item_time
-        if age > max_age:
-            break
-        item_sha = item.newhexsha
-        if item_sha not in hide_list_shas:
-            tip_shas.add(item_sha)
-
-    # Find ancestors of tips which are not ancestors of trunk
-    rev_list_cmds = list(tip_shas) + [f"^{r.trunk_ref}"]
-    branch_commit_shas = set(r.repo.git.rev_list(*rev_list_cmds).split("\n"))
-
-    branch_commits: List[git.Commit] = [
-        r.repo.commit(sha) for sha in branch_commit_shas
-    ]
-
-    # build the node objects
-    commit_nodes: Dict[str, CommitNode] = {}
-    for bc in branch_commits:
-        commit_nodes[bc.hexsha] = CommitNode(bc)
-
-    # link the node objects
-    trunk_branch_commit = r.repo.commit(r.trunk_ref)
-    trunk_nodes: Dict[str, CommitNode] = {
-        trunk_branch_commit.hexsha: CommitNode(trunk_branch_commit)
-    }
-    for node in commit_nodes.values():
-        parent_commit = node.commit.parents[0]
-        parent_sha = parent_commit.hexsha
-        if parent_sha not in commit_nodes:
-            if parent_sha not in trunk_nodes:
-                trunk_nodes[parent_sha] = CommitNode(parent_commit)
-            trunk_nodes[parent_sha].children.append(node)
-        else:
-            commit_nodes[parent_sha].children.append(node)
-
-    ordered_tree = sorted(
-        trunk_nodes.values(), key=lambda n: n.commit.committed_datetime, reverse=True
-    )
-    return HeadyTree(commit_nodes, ordered_tree)
 
 
 if __name__ == "__main__":
