@@ -1,10 +1,16 @@
 import datetime
-import pathlib
 from dataclasses import dataclass
-from pprint import pprint
 from typing import Dict, List, Set
 
 import git
+
+from heady import config
+
+
+@dataclass
+class HeadyRepo:
+    trunk_ref: str
+    repo: git.Repo
 
 
 @dataclass
@@ -49,12 +55,6 @@ class HeadyTree:
     trunk_nodes: List[CommitNode]
 
 
-@dataclass
-class HeadyRepo:
-    trunk_ref: str
-    repo: git.Repo
-
-
 def main() -> None:
     r = HeadyRepo("origin/main", git.Repo("/Users/leigh/src/nextdoor.com"))
     print_tips_tree(r)
@@ -80,15 +80,13 @@ def hide_subtree(r: HeadyRepo, hide_root_ref: str) -> None:
     if hide_root_sha not in tree.commit_nodes:
         raise ValueError(f"Did not find {hide_root_sha} in the visible tree")
 
-    existing_hidden_tips = get_hide_list()
+    existing_hidden_tips = config.get_hide_list(r.repo)
     new_hidden_shas = []
     for new_hide_sha in collect_subtree_shas(tree.commit_nodes[hide_root_sha]):
         if new_hide_sha not in existing_hidden_tips:
             new_hidden_shas.append(new_hide_sha)
 
-    with ensure_hide_list_file().open("a") as f:
-        for sha in new_hidden_shas:
-            f.write(f"{sha}\n")
+    config.append_to_hide_list(r.repo, new_hidden_shas)
 
 
 def collect_subtree_shas(node: CommitNode) -> List[str]:
@@ -118,7 +116,7 @@ def build_tree(r: HeadyRepo) -> HeadyTree:
     cur_time = datetime.datetime.now()
     max_age = datetime.timedelta(days=14)
 
-    hide_list_shas = get_hide_list()
+    hide_list_shas = config.get_hide_list(r.repo)
     tip_shas = set()
 
     item: git.RefLogEntry
@@ -135,8 +133,6 @@ def build_tree(r: HeadyRepo) -> HeadyTree:
     # Find ancestors of tips which are not ancestors of trunk
     rev_list_cmds = list(tip_shas) + [f"^{r.trunk_ref}"]
     branch_commit_shas = set(r.repo.git.rev_list(*rev_list_cmds).split("\n"))
-
-    root_sha = r.repo.merge_base(*list(branch_commit_shas), r.trunk_ref)
 
     branch_commits: List[git.Commit] = [
         r.repo.commit(sha) for sha in branch_commit_shas
@@ -166,27 +162,6 @@ def build_tree(r: HeadyRepo) -> HeadyTree:
         trunk_nodes.values(), key=lambda n: n.commit.committed_datetime, reverse=True
     )
     return HeadyTree(commit_nodes, ordered_tree)
-
-
-def ensure_config_directory() -> pathlib.Path:
-    config_dir = pathlib.Path.home().joinpath("Library", "Application Support", "heady")
-    config_dir.mkdir(parents=True, exist_ok=True)
-    return config_dir
-
-
-def ensure_hide_list_file() -> pathlib.Path:
-    p = ensure_config_directory().joinpath("hidelist")
-    if not p.exists():
-        p.touch()
-    return p
-
-
-def get_hide_list() -> Set[str]:
-    res = set()
-    with ensure_hide_list_file().open("r") as f:
-        for line in f.readlines():
-            res.add(line.strip())
-    return res
 
 
 if __name__ == "__main__":
