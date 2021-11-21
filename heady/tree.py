@@ -1,6 +1,6 @@
 import datetime
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, Set
 
 import git
 
@@ -104,8 +104,10 @@ def build_tree(r: HeadyRepo) -> HeadyTree:
     return HeadyTree(commit_nodes, ordered_tree)
 
 
-def collect_subtree_shas(node: CommitNode) -> List[str]:
-    result = [node.commit.hexsha]
+def collect_subtree_shas(node: CommitNode, dest: Set[str]) -> None:
+    sha = node.commit.hexsha
+    if sha in dest:
+        return
+    dest.add(sha)
     for child in node.children:
-        result.extend(collect_subtree_shas(child))
-    return result
+        collect_subtree_shas(child, dest)

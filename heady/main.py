@@ -1,5 +1,7 @@
 import argparse
 import pathlib
+from pprint import pprint
+from typing import List
 
 import git
 
@@ -27,7 +29,7 @@ def main() -> None:
     hide_parser = subparsers.add_parser(
         "hide", help="Hide the subtree from this revision"
     )
-    hide_parser.add_argument("rev", type=str)
+    hide_parser.add_argument("revs", type=str, nargs="+")
     hide_parser.set_defaults(func=hide_cmd)
 
     args = parser.parse_args()
@@ -56,35 +58,42 @@ def tree_cmd(r: HeadyRepo, _args: argparse.Namespace) -> None:
 
 
 def hide_cmd(r: HeadyRepo, args: argparse.Namespace) -> None:
-    hide_subtree(r, args.rev)
+    revs: List[str] = args.revs
+    hide_subtrees(r, revs)
 
 
-def hide_subtree(r: HeadyRepo, hide_root_ref: str) -> None:
+def hide_subtrees(r: HeadyRepo, hide_root_refs: List[str]) -> None:
     # Raises if the hide root doesn't exist
-    hide_root_commit = r.repo.commit(hide_root_ref)
 
-    # Verify that we are not attempting to hide a commit in trunk
-    if is_ancestor(r, hide_root_ref, r.trunk_ref):
-        raise ValueError(
-            f"Can not hide {hide_root_ref} because it would hide {r.trunk_ref}"
-        )
+    hide_root_commits = []
+    for hide_root_ref in hide_root_refs:
+        hide_root_commit = r.repo.commit(hide_root_ref)
 
-    if is_ancestor(r, hide_root_ref, "HEAD"):
-        raise ValueError(f"Can not hide {hide_root_ref} because it would hide HEAD")
+        # Verify that we are not attempting to hide a commit in trunk
+        if is_ancestor(r, hide_root_ref, r.trunk_ref):
+            raise ValueError(
+                f"Can not hide {hide_root_ref} because it would hide {r.trunk_ref}"
+            )
 
+        if is_ancestor(r, hide_root_ref, "HEAD"):
+            raise ValueError(f"Can not hide {hide_root_ref} because it would hide HEAD")
+
+        hide_root_commits.append(hide_root_commit
+                                 )
     # Find all the child nodes in the tree to hide
     t = tree.build_tree(r)
-    hide_root_sha = hide_root_commit.hexsha
-    if hide_root_sha not in t.commit_nodes:
-        raise ValueError(f"Did not find {hide_root_sha} in the visible tree")
+    shas_to_hide = set()
+    for hide_root_commit in hide_root_commits:
+        hide_root_sha = hide_root_commit.hexsha
+        if hide_root_sha not in t.commit_nodes:
+            raise ValueError(f"Did not find {hide_root_sha} in the visible tree")
+        tree.collect_subtree_shas(t.commit_nodes[hide_root_sha], shas_to_hide)
 
-    existing_hidden_tips = config.get_hide_list(r.repo)
-    new_hidden_shas = []
-    for new_hide_sha in tree.collect_subtree_shas(t.commit_nodes[hide_root_sha]):
-        if new_hide_sha not in existing_hidden_tips:
-            new_hidden_shas.append(new_hide_sha)
+    nodes_to_remove = shas_to_hide - config.get_hide_list(r.repo)
 
-    config.append_to_hide_list(r.repo, new_hidden_shas)
+    print("nodes to hide")
+    pprint(nodes_to_remove)
+    config.append_to_hide_list(r.repo, nodes_to_remove)
 
 
 def is_ancestor(r: HeadyRepo, ancestor_ref: str, descendent_ref: str):
