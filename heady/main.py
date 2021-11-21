@@ -32,6 +32,12 @@ def main() -> None:
     hide_parser.add_argument("revs", type=str, nargs="+")
     hide_parser.set_defaults(func=hide_cmd)
 
+    hide_parser = subparsers.add_parser(
+        "unhide", help="Hide the subtree from this revision"
+    )
+    hide_parser.add_argument("revs", type=str, nargs="+")
+    hide_parser.set_defaults(func=unhide_cmd)
+
     args = parser.parse_args()
 
     original_repo_path = (
@@ -61,6 +67,10 @@ def hide_cmd(r: HeadyRepo, args: argparse.Namespace) -> None:
     revs: List[str] = args.revs
     hide_subtrees(r, revs)
 
+
+def unhide_cmd(r: HeadyRepo, args: argparse.Namespace) -> None:
+    revs: List[str] = args.revs
+    unhide_revs(r, revs)
 
 def hide_subtrees(r: HeadyRepo, hide_root_refs: List[str]) -> None:
     # Raises if the hide root doesn't exist
@@ -95,6 +105,18 @@ def hide_subtrees(r: HeadyRepo, hide_root_refs: List[str]) -> None:
     pprint(nodes_to_remove)
     config.append_to_hide_list(r.repo, nodes_to_remove)
 
+def unhide_revs(r: HeadyRepo, unhide_revs: List[str]) -> None:
+    new_hide_list = config.get_hide_list(r.repo)
+    for rev in unhide_revs:
+        # Raises if the hide root doesn't exist
+        unhide_sha = r.repo.commit(rev).hexsha
+        if unhide_sha not in new_hide_list:
+            raise ValueError(f'Can not unhide {rev} because it is not hidden')
+        else:
+            new_hide_list.remove(unhide_sha)
+
+    config.replace_hide_list(r.repo, new_hide_list)
+
 
 def is_ancestor(r: HeadyRepo, ancestor_ref: str, descendent_ref: str):
     # If all commits of ancestor_ref exist in descendent_ref, it must be an ancestor
@@ -106,7 +128,6 @@ def is_ancestor(r: HeadyRepo, ancestor_ref: str, descendent_ref: str):
 
 def print_tips_tree(r: HeadyRepo) -> None:
     t = tree.build_tree(r)
-
     for node in t.trunk_nodes:
         node.print_tree()
 

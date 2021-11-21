@@ -12,10 +12,12 @@ from heady.repo import HeadyRepo
 class CommitNode:
     commit: git.Commit
     children: List["CommitNode"]
+    is_hidden: bool
 
-    def __init__(self, commit: git.Commit):
+    def __init__(self, commit: git.Commit, is_hidden: bool):
         self.commit = commit
         self.children = []
+        self.is_hidden = is_hidden
 
     def print_tree(self) -> None:
         self._print_children(1)
@@ -40,7 +42,12 @@ class CommitNode:
     def _print_self(self, indent: int) -> None:
         bars = "| " * indent
         short_message = self.commit.message.split("\n", 1)[0]
-        dot_char = "@" if self.commit.repo.head.commit == self.commit else "*"
+        if self.commit.repo.head.commit == self.commit:
+            dot_char = "@"
+        elif self.is_hidden:
+            dot_char = "."
+        else:
+            dot_char = "*"
         print(f"{bars}{dot_char} {self.commit.hexsha[:8]} {short_message}")
 
 
@@ -81,19 +88,23 @@ def build_tree(r: HeadyRepo) -> HeadyTree:
     # build the node objects
     commit_nodes: Dict[str, CommitNode] = {}
     for bc in branch_commits:
-        commit_nodes[bc.hexsha] = CommitNode(bc)
+        commit_nodes[bc.hexsha] = CommitNode(bc, is_hidden=bc.hexsha in hide_list_shas)
 
     # link the node objects
     trunk_branch_commit = r.repo.commit(r.trunk_ref)
     trunk_nodes: Dict[str, CommitNode] = {
-        trunk_branch_commit.hexsha: CommitNode(trunk_branch_commit)
+        trunk_branch_commit.hexsha: CommitNode(
+            trunk_branch_commit, is_hidden=trunk_branch_commit.hexsha in hide_list_shas
+        )
     }
     for node in commit_nodes.values():
         parent_commit = node.commit.parents[0]
         parent_sha = parent_commit.hexsha
         if parent_sha not in commit_nodes:
             if parent_sha not in trunk_nodes:
-                trunk_nodes[parent_sha] = CommitNode(parent_commit)
+                trunk_nodes[parent_sha] = CommitNode(
+                    parent_commit, is_hidden=parent_sha in hide_list_shas
+                )
             trunk_nodes[parent_sha].children.append(node)
         else:
             commit_nodes[parent_sha].children.append(node)
