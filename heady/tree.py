@@ -1,6 +1,6 @@
 import datetime
 from dataclasses import dataclass
-from typing import Dict, List, Set
+from typing import Dict, Iterable, List, Optional, Set
 
 import git
 
@@ -13,11 +13,15 @@ class CommitNode:
     commit: git.Commit
     children: List["CommitNode"]
     is_hidden: bool
+    labels: Optional[List[str]]
 
-    def __init__(self, commit: git.Commit, is_hidden: bool):
+    def __init__(
+        self, commit: git.Commit, is_hidden: bool, labels: Optional[Iterable[str]]
+    ):
         self.commit = commit
         self.children = []
         self.is_hidden = is_hidden
+        self.labels = labels
 
     def print_tree(self) -> None:
         self._print_children(1)
@@ -48,7 +52,11 @@ class CommitNode:
             dot_char = "."
         else:
             dot_char = "*"
-        print(f"{bars}{dot_char} {self.commit.hexsha[:8]} {short_message}")
+        if self.labels:
+            label_str = " {" + ",".join(self.labels) + "}"
+        else:
+            label_str = ""
+        print(f"{bars}{dot_char} {self.commit.hexsha[:8]}{label_str} {short_message}")
 
 
 @dataclass
@@ -65,6 +73,7 @@ def build_tree(r: HeadyRepo) -> HeadyTree:
     hide_list_shas = config.get_hide_list(r.repo)
     tip_shas = set()
 
+    # Find tips from the reflog
     item: git.RefLogEntry
     for item in reversed(reflog):
         time_seconds, _offset = item.time
@@ -76,6 +85,16 @@ def build_tree(r: HeadyRepo) -> HeadyTree:
         if item_sha not in hide_list_shas:
             tip_shas.add(item_sha)
 
+    # Find tips from special branches
+    special_branches: Dict[str, Set[str]] = dict()
+    for local_head in r.repo.heads:
+        sha = local_head.commit.hexsha
+        tip_shas.add(sha)
+        special_branches.setdefault(sha, set()).add(local_head.name)
+    special_branches.setdefault(r.repo.commit(r.trunk_ref).hexsha, set()).add(
+        r.trunk_ref
+    )
+
     # Find ancestors of tips which are not ancestors of trunk
     rev_list_cmds = list(tip_shas) + [f"^{r.trunk_ref}"]
     rev_list_output = r.repo.git.rev_list(*rev_list_cmds)
@@ -85,26 +104,29 @@ def build_tree(r: HeadyRepo) -> HeadyTree:
         r.repo.commit(sha) for sha in branch_commit_shas
     ]
 
+    def make_node(commit: git.Commit) -> CommitNode:
+        return CommitNode(
+            commit,
+            is_hidden=commit.hexsha in hide_list_shas,
+            labels=special_branches.get(commit.hexsha, None),
+        )
+
     # build the node objects
     commit_nodes: Dict[str, CommitNode] = {}
     for bc in branch_commits:
-        commit_nodes[bc.hexsha] = CommitNode(bc, is_hidden=bc.hexsha in hide_list_shas)
+        commit_nodes[bc.hexsha] = make_node(bc)
 
     # link the node objects
     trunk_branch_commit = r.repo.commit(r.trunk_ref)
     trunk_nodes: Dict[str, CommitNode] = {
-        trunk_branch_commit.hexsha: CommitNode(
-            trunk_branch_commit, is_hidden=trunk_branch_commit.hexsha in hide_list_shas
-        )
+        trunk_branch_commit.hexsha: make_node(trunk_branch_commit)
     }
     for node in commit_nodes.values():
         parent_commit = node.commit.parents[0]
         parent_sha = parent_commit.hexsha
         if parent_sha not in commit_nodes:
             if parent_sha not in trunk_nodes:
-                trunk_nodes[parent_sha] = CommitNode(
-                    parent_commit, is_hidden=parent_sha in hide_list_shas
-                )
+                trunk_nodes[parent_sha] = make_node(parent_commit)
             trunk_nodes[parent_sha].children.append(node)
         else:
             commit_nodes[parent_sha].children.append(node)
