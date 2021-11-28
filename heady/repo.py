@@ -1,10 +1,10 @@
 from dataclasses import dataclass
+from typing import List
 
 import git
 
 
 @dataclass
 class HeadyRepo:
-    trunk_ref: str
+    trunk_refs: List[str]
     repo: git.Repo
-

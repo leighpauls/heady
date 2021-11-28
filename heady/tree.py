@@ -1,5 +1,6 @@
 import datetime
 from dataclasses import dataclass
+from pprint import pprint
 from typing import Dict, Iterable, List, Optional, Set
 
 import git
@@ -91,12 +92,15 @@ def build_tree(r: HeadyRepo) -> HeadyTree:
         sha = local_head.commit.hexsha
         tip_shas.add(sha)
         special_branches.setdefault(sha, set()).add(local_head.name)
-    special_branches.setdefault(r.repo.commit(r.trunk_ref).hexsha, set()).add(
-        r.trunk_ref
-    )
+    for trunk_ref in r.trunk_refs:
+        special_branches.setdefault(r.repo.commit(trunk_ref).hexsha, set()).add(
+            trunk_ref
+        )
+    pprint(r.trunk_refs)
+    pprint(special_branches)
 
     # Find ancestors of tips which are not ancestors of trunk
-    rev_list_cmds = list(tip_shas) + [f"^{r.trunk_ref}"]
+    rev_list_cmds = list(tip_shas) + [f"^{trunk_ref}" for trunk_ref in r.trunk_refs]
     rev_list_output = r.repo.git.rev_list(*rev_list_cmds)
     branch_commit_shas = set(rev_list_output.split("\n")) if rev_list_output else set()
 
@@ -116,11 +120,13 @@ def build_tree(r: HeadyRepo) -> HeadyTree:
     for bc in branch_commits:
         commit_nodes[bc.hexsha] = make_node(bc)
 
+    # Add the trunk nodes
+    trunk_nodes: Dict[str, CommitNode] = {}
+    for trunk_ref in r.trunk_refs:
+        trunk_commit = r.repo.commit(trunk_ref)
+        trunk_nodes[trunk_commit.hexsha] = make_node(trunk_commit)
+
     # link the node objects
-    trunk_branch_commit = r.repo.commit(r.trunk_ref)
-    trunk_nodes: Dict[str, CommitNode] = {
-        trunk_branch_commit.hexsha: make_node(trunk_branch_commit)
-    }
     for node in commit_nodes.values():
         parent_commit = node.commit.parents[0]
         parent_sha = parent_commit.hexsha
