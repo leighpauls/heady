@@ -1,0 +1,21 @@
+#!/bin/bash
+
+set -e
+
+RUN_IN_DIR="$PWD"
+
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ] ; do {
+    SOURCE="$(readlink "$SOURCE")"
+} done
+
+SOURCE_DIR=$(dirname "$SOURCE")
+
+pushd $SOURCE_DIR > /dev/null
+
+export ROOT_ARGS="$@"
+
+poetry run sh -c "cd \"$RUN_IN_DIR\" ; heady $ROOT_ARGS"
+
+popd  > /dev/null
+
