@@ -38,6 +38,11 @@ def main() -> None:
     hide_parser.add_argument("revs", type=str, nargs="+")
     hide_parser.set_defaults(func=unhide_cmd)
 
+    label_parser = subparsers.add_parser("label", help="Apply labels to commits.")
+    label_parser.set_defaults(func=label_cmd)
+    label_parser.add_argument("label_prefix", type=str)
+    label_parser.add_argument("revs", type=str, nargs="+")
+
     args = parser.parse_args()
 
     original_repo_path = (
@@ -73,6 +78,10 @@ def unhide_cmd(r: HeadyRepo, args: argparse.Namespace) -> None:
     unhide_revs(r, revs)
 
 
+def label_cmd(r: HeadyRepo, args: argparse.Namespace) -> None:
+    label_revs(r, args.label_prefix, args.revs)
+
+
 def hide_subtrees(r: HeadyRepo, hide_root_refs: List[str]) -> None:
     # Raises if the hide root doesn't exist
 
@@ -81,14 +90,15 @@ def hide_subtrees(r: HeadyRepo, hide_root_refs: List[str]) -> None:
         hide_root_commit = r.repo.commit(hide_root_ref)
 
         # Verify that we are not attempting to hide a commit in trunk
-        for trunk_ref in r.trunk_refs:
-            if is_ancestor(r, hide_root_ref, trunk_ref):
-                raise ValueError(
-                    f"Can not hide {hide_root_ref} because it would hide {trunk_ref}"
-                )
+        if is_in_trunk(r, hide_root_ref):
+            raise ValueError(
+                f"Can not hide {hide_root_ref} because it would hide a truck ref."
+            )
 
         if is_ancestor(r, hide_root_ref, "HEAD"):
-            raise ValueError(f"Can not hide {hide_root_ref} because it would hide HEAD")
+            raise ValueError(
+                f"Can not hide {hide_root_ref} because it would hide HEAD."
+            )
 
         hide_root_commits.append(hide_root_commit)
     # Find all the child nodes in the tree to hide
@@ -97,13 +107,13 @@ def hide_subtrees(r: HeadyRepo, hide_root_refs: List[str]) -> None:
     for hide_root_commit in hide_root_commits:
         hide_root_sha = hide_root_commit.hexsha
         if hide_root_sha not in t.commit_nodes:
-            print(f"Did not find {hide_root_sha} in the visible tree, skipping it")
+            print(f"Did not find {hide_root_sha} in the visible tree, skipping it.")
         else:
             tree.collect_subtree_shas(t.commit_nodes[hide_root_sha], shas_to_hide)
 
     nodes_to_remove = shas_to_hide - config.get_hide_list(r.repo)
 
-    print("Hiding")
+    print("Hiding:")
     pprint(nodes_to_remove)
     config.append_to_hide_list(r.repo, nodes_to_remove)
 
@@ -121,7 +131,36 @@ def unhide_revs(r: HeadyRepo, unhide_revs: List[str]) -> None:
     config.replace_hide_list(r.repo, new_hide_list)
 
 
-def is_ancestor(r: HeadyRepo, ancestor_ref: str, descendent_ref: str):
+def label_revs(r: HeadyRepo, label_prefix: str, revs: List[str]) -> None:
+    t = tree.build_tree(r)
+
+    commits_to_label = []
+    for rev in revs:
+        commit = r.repo.commit(rev)
+        if is_in_trunk(r, rev):
+            raise ValueError(f"Can not label {rev} because it is in trunk.")
+
+        if commit.hexsha not in t.commit_nodes:
+            raise ValueError(
+                f"Can not label {rev} because it is not visible in the tree"
+            )
+
+        if get_labels(commit):
+            raise ValueError(f"Can not label {rev} because it already has a label.")
+
+        commits_to_label.append(commit)
+
+    # TODO: apply the label
+
+
+def is_in_trunk(r: HeadyRepo, ref: str) -> bool:
+    for trunk in r.trunk_refs:
+        if is_ancestor(r, ref, trunk):
+            return True
+    return False
+
+
+def is_ancestor(r: HeadyRepo, ancestor_ref: str, descendent_ref: str) -> bool:
     # If all commits of ancestor_ref exist in descendent_ref, it must be an ancestor
     missing_lineage = list(
         r.repo.iter_commits(f"{descendent_ref}..{ancestor_ref}", max_count=1)
@@ -133,6 +172,15 @@ def print_tips_tree(r: HeadyRepo) -> None:
     t = tree.build_tree(r)
     for node in t.trunk_nodes:
         node.print_tree()
+
+
+def get_labels(commit: git.Commit) -> List[str]:
+    result = []
+    for line in commit.message.split("\n"):
+        if not line.startswith("heady_label:"):
+            continue
+        result.append(line.split(":", 1)[1].strip())
+    return result
 
 
 if __name__ == "__main__":
