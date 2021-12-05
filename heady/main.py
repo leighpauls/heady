@@ -1,5 +1,6 @@
 import argparse
 import pathlib
+import tempfile
 from pprint import pprint
 from typing import List
 
@@ -43,6 +44,13 @@ def main() -> None:
     label_parser.add_argument("label_prefix", type=str)
     label_parser.add_argument("revs", type=str, nargs="+")
 
+    move_parser = subparsers.add_parser("move", help="Move a subtree of commitss")
+    move_parser.set_defaults(func=move_cmd)
+    move_parser.add_argument(
+        "source_root", type=str, help="Root of the subtree to move."
+    )
+    move_parser.add_argument("dest_parent", type=str, help="New parent of the subtree.")
+
     args = parser.parse_args()
 
     original_repo_path = (
@@ -80,6 +88,10 @@ def unhide_cmd(r: HeadyRepo, args: argparse.Namespace) -> None:
 
 def label_cmd(r: HeadyRepo, args: argparse.Namespace) -> None:
     label_revs(r, args.label_prefix, args.revs)
+
+
+def move_cmd(r: HeadyRepo, args: argparse.Namespace) -> None:
+    move_commits(r, args.source_root, args.dest_parent)
 
 
 def hide_subtrees(r: HeadyRepo, hide_root_refs: List[str]) -> None:
@@ -151,6 +163,41 @@ def label_revs(r: HeadyRepo, label_prefix: str, revs: List[str]) -> None:
         commits_to_label.append(commit)
 
     # TODO: apply the label
+
+
+def move_commits(r: HeadyRepo, source: str, dest: str) -> None:
+    source_commit = r.repo.commit(source)
+    dest_commit: git.Commit = r.repo.commit(dest)
+    if is_in_trunk(r, source):
+        raise ValueError(f"Can't move {source} because it's in trunk.")
+
+    t = tree.build_tree(r)
+    if source_commit.hexsha not in t.commit_nodes:
+        raise ValueError(f"Can't move {source} because it's not visible in the tree.")
+
+    _visit_commit(r, dest_commit)
+    _move_commits_recursive(r, t, source_commit)
+
+
+def _move_commits_recursive(
+    r: HeadyRepo, t: tree.HeadyTree, source: git.Commit
+) -> None:
+    source_sha = source.hexsha
+    print(f"Cherry pick {source_sha}.")
+    r.repo.git.cherry_pick(source_sha)
+
+    base_commit = r.repo.head.commit
+    for child_node in t.commit_nodes[source_sha].children:
+        _move_commits_recursive(r, t, child_node.commit)
+        _visit_commit(r, base_commit)
+
+
+def _visit_commit(r: HeadyRepo, dest: git.Commit) -> None:
+    if r.repo.is_dirty():
+        raise ValueError(f"Can't move while the repo is dirty.")
+
+    r.repo.head.reference = dest
+    r.repo.head.reset(index=True, working_tree=True)
 
 
 def is_in_trunk(r: HeadyRepo, ref: str) -> bool:
