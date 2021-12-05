@@ -97,12 +97,13 @@ def hide_subtrees(r: HeadyRepo, hide_root_refs: List[str]) -> None:
     for hide_root_commit in hide_root_commits:
         hide_root_sha = hide_root_commit.hexsha
         if hide_root_sha not in t.commit_nodes:
-            raise ValueError(f"Did not find {hide_root_sha} in the visible tree")
-        tree.collect_subtree_shas(t.commit_nodes[hide_root_sha], shas_to_hide)
+            print(f"Did not find {hide_root_sha} in the visible tree, skipping it")
+        else:
+            tree.collect_subtree_shas(t.commit_nodes[hide_root_sha], shas_to_hide)
 
     nodes_to_remove = shas_to_hide - config.get_hide_list(r.repo)
 
-    print("nodes to hide")
+    print("Hiding")
     pprint(nodes_to_remove)
     config.append_to_hide_list(r.repo, nodes_to_remove)
 
@@ -113,7 +114,7 @@ def unhide_revs(r: HeadyRepo, unhide_revs: List[str]) -> None:
         # Raises if the hide root doesn't exist
         unhide_sha = r.repo.commit(rev).hexsha
         if unhide_sha not in new_hide_list:
-            raise ValueError(f"Can not unhide {rev} because it is not hidden")
+            print(f"Can not unhide {rev} because it is not hidden")
         else:
             new_hide_list.remove(unhide_sha)
 
