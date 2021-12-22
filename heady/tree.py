@@ -74,16 +74,21 @@ def build_tree(r: HeadyRepo) -> HeadyTree:
     hide_list_shas = config.get_hide_list(r.repo)
     tip_shas = set()
 
+    amended_shas = set()
+
     # Find tips from the reflog
     item: git.RefLogEntry
     for item in reversed(reflog):
+        # Hide shas which have been amended since the last time they were visited
+        if item.message.startswith("commit (amend):"):
+            amended_shas.add(item.oldhexsha)
         time_seconds, _offset = item.time
         item_time = datetime.datetime.fromtimestamp(time_seconds)
         age = cur_time - item_time
         if age > max_age:
             break
         item_sha = item.newhexsha
-        if item_sha not in hide_list_shas:
+        if item_sha not in hide_list_shas and item.newhexsha not in amended_shas:
             tip_shas.add(item_sha)
 
     # Find tips from special branches
