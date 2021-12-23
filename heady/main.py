@@ -41,7 +41,7 @@ def main() -> None:
     label_parser = subparsers.add_parser("label", help="Apply labels to commits.")
     label_parser.set_defaults(func=label_cmd)
     label_parser.add_argument("label_prefix", type=str)
-    label_parser.add_argument("rev", type=str)
+    label_parser.add_argument("--rev", type=str, default="HEAD")
 
     move_parser = subparsers.add_parser("move", help="Move a subtree of commitss")
     move_parser.set_defaults(func=move_cmd)
@@ -145,21 +145,22 @@ def unhide_revs(r: HeadyRepo, unhide_revs: List[str]) -> None:
 def label_rev(r: HeadyRepo, label_prefix: str, rev: str) -> None:
     t = tree.build_tree(r)
 
-    commit = r.repo.commit(rev)
+    source_commit = r.repo.commit(rev)
     if is_in_trunk(r, rev):
         raise ValueError(f"Can not label {rev} because it is in trunk.")
 
-    if commit.hexsha not in t.commit_nodes:
+    if source_commit.hexsha not in t.commit_nodes:
         raise ValueError(f"Can not label {rev} because it is not visible in the tree")
 
-    if labels.get_labels(commit):
+    if labels.get_labels(source_commit):
         raise ValueError(f"Can not label {rev} because it already has a label.")
 
-    _visit_commit(r, commit)
+    _visit_commit(r, source_commit)
     new_label = config.acquire_next_label(r.repo, label_prefix)
-    new_message = f"{commit.message}\nheady_label: {new_label}\n"
+    new_message = f"{source_commit.message}\nheady_label: {new_label}\n"
 
     r.repo.git.commit(message=new_message, amend=True, no_verify=True)
+    _move_children_to_head(r, t, source_commit)
 
 
 def move_commits(r: HeadyRepo, source: str, dest: str) -> None:
@@ -186,8 +187,14 @@ def _move_commits_recursive(
     print(f"Hide {source_sha}")
     config.append_to_hide_list(r.repo, [source_sha])
 
+    _move_children_to_head(r, t, source)
+
+
+def _move_children_to_head(
+    r: HeadyRepo, t: tree.HeadyTree, source_parent: git.Commit
+) -> None:
     base_commit = r.repo.head.commit
-    for child_node in t.commit_nodes[source_sha].children:
+    for child_node in t.commit_nodes[source_parent.hexsha].children:
         _move_commits_recursive(r, t, child_node.commit)
         _visit_commit(r, base_commit)
 
