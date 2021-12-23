@@ -1,7 +1,6 @@
 import datetime
 from dataclasses import dataclass
-from pprint import pprint
-from typing import Dict, Iterable, List, Optional, Set
+from typing import Dict, List, Set
 
 import git
 
@@ -99,8 +98,6 @@ def build_tree(r: HeadyRepo) -> HeadyTree:
         special_branches.setdefault(r.repo.commit(trunk_ref).hexsha, set()).add(
             trunk_ref
         )
-    pprint(r.trunk_refs)
-    pprint(special_branches)
 
     # Find ancestors of tips which are not ancestors of trunk
     rev_list_cmds = list(tip_shas) + [f"^{trunk_ref}" for trunk_ref in r.trunk_refs]
