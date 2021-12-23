@@ -50,6 +50,12 @@ def main() -> None:
     )
     move_parser.add_argument("dest_parent", type=str, help="New parent of the subtree.")
 
+    goto_parser = subparsers.add_parser(
+        "goto", help="Check out a revision using tree directions."
+    )
+    goto_parser.set_defaults(func=goto_cmd)
+    goto_parser.add_argument("command", type=str, choices=["next", "prev", "tip"])
+
     args = parser.parse_args()
 
     original_repo_path = (
@@ -91,6 +97,10 @@ def label_cmd(r: HeadyRepo, args: argparse.Namespace) -> None:
 
 def move_cmd(r: HeadyRepo, args: argparse.Namespace) -> None:
     move_commits(r, args.source_root, args.dest_parent)
+
+
+def goto_cmd(r: HeadyRepo, args: argparse.Namespace) -> None:
+    goto_commit(r, args.command)
 
 
 def hide_subtrees(r: HeadyRepo, hide_root_refs: List[str]) -> None:
@@ -175,6 +185,34 @@ def move_commits(r: HeadyRepo, source: str, dest: str) -> None:
 
     _visit_commit(r, dest_commit)
     _move_commits_recursive(r, t, source_commit)
+
+
+def goto_commit(r: HeadyRepo, command: str) -> None:
+    t = tree.build_tree(r)
+
+    head_commit = r.repo.head.commit
+    head_node = t.commit_nodes[head_commit.hexsha]
+
+    if command == "prev":
+        parent_commit = head_commit.parents[0]
+        _visit_commit(r, parent_commit)
+    elif command == "next":
+        children = head_node.children
+        if len(children) > 1:
+            raise ValueError(
+                "Can't 'goto next' from node with more than 1 child in tree."
+            )
+        elif len(children) == 0:
+            raise ValueError("Can't 'goto next' from node without a child.")
+
+        _visit_commit(r, head_node.children[0].commit)
+    elif command == "tip":
+        cur_node = head_node
+        while cur_node.children:
+            if len(cur_node.children) > 1:
+                raise ValueError("Can't 'goto tip' from node with more than 1 tip.")
+            cur_node = cur_node.children[0]
+        _visit_commit(r, cur_node.commit)
 
 
 def _move_commits_recursive(
