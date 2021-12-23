@@ -1,12 +1,11 @@
 import argparse
 import pathlib
-import tempfile
 from pprint import pprint
 from typing import List
 
 import git
 
-from heady import config, tree
+from heady import config, labels, tree
 from heady.repo import HeadyRepo
 
 
@@ -42,7 +41,7 @@ def main() -> None:
     label_parser = subparsers.add_parser("label", help="Apply labels to commits.")
     label_parser.set_defaults(func=label_cmd)
     label_parser.add_argument("label_prefix", type=str)
-    label_parser.add_argument("revs", type=str, nargs="+")
+    label_parser.add_argument("rev", type=str)
 
     move_parser = subparsers.add_parser("move", help="Move a subtree of commitss")
     move_parser.set_defaults(func=move_cmd)
@@ -87,7 +86,7 @@ def unhide_cmd(r: HeadyRepo, args: argparse.Namespace) -> None:
 
 
 def label_cmd(r: HeadyRepo, args: argparse.Namespace) -> None:
-    label_revs(r, args.label_prefix, args.revs)
+    label_rev(r, args.label_prefix, args.rev)
 
 
 def move_cmd(r: HeadyRepo, args: argparse.Namespace) -> None:
@@ -143,26 +142,24 @@ def unhide_revs(r: HeadyRepo, unhide_revs: List[str]) -> None:
     config.replace_hide_list(r.repo, new_hide_list)
 
 
-def label_revs(r: HeadyRepo, label_prefix: str, revs: List[str]) -> None:
+def label_rev(r: HeadyRepo, label_prefix: str, rev: str) -> None:
     t = tree.build_tree(r)
 
-    commits_to_label = []
-    for rev in revs:
-        commit = r.repo.commit(rev)
-        if is_in_trunk(r, rev):
-            raise ValueError(f"Can not label {rev} because it is in trunk.")
+    commit = r.repo.commit(rev)
+    if is_in_trunk(r, rev):
+        raise ValueError(f"Can not label {rev} because it is in trunk.")
 
-        if commit.hexsha not in t.commit_nodes:
-            raise ValueError(
-                f"Can not label {rev} because it is not visible in the tree"
-            )
+    if commit.hexsha not in t.commit_nodes:
+        raise ValueError(f"Can not label {rev} because it is not visible in the tree")
 
-        if get_labels(commit):
-            raise ValueError(f"Can not label {rev} because it already has a label.")
+    if labels.get_labels(commit):
+        raise ValueError(f"Can not label {rev} because it already has a label.")
 
-        commits_to_label.append(commit)
+    _visit_commit(r, commit)
+    new_label = config.acquire_next_label(r.repo, label_prefix)
+    new_message = f"{commit.message}\nheady_label: {new_label}\n"
 
-    # TODO: apply the label
+    r.repo.git.commit(message=new_message, amend=True, no_verify=True)
 
 
 def move_commits(r: HeadyRepo, source: str, dest: str) -> None:
@@ -186,7 +183,7 @@ def _move_commits_recursive(
     print(f"Cherry pick {source_sha}.")
     r.repo.git.cherry_pick(source_sha)
 
-    print(f'Hide {source_sha}')
+    print(f"Hide {source_sha}")
     config.append_to_hide_list(r.repo, [source_sha])
 
     base_commit = r.repo.head.commit
@@ -222,15 +219,6 @@ def print_tips_tree(r: HeadyRepo) -> None:
     t = tree.build_tree(r)
     for node in t.trunk_nodes:
         node.print_tree()
-
-
-def get_labels(commit: git.Commit) -> List[str]:
-    result = []
-    for line in commit.message.split("\n"):
-        if not line.startswith("heady_label:"):
-            continue
-        result.append(line.split(":", 1)[1].strip())
-    return result
 
 
 if __name__ == "__main__":

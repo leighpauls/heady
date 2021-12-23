@@ -5,7 +5,7 @@ from typing import Dict, Iterable, List, Optional, Set
 
 import git
 
-from heady import config
+from heady import config, labels
 from heady.repo import HeadyRepo
 
 
@@ -14,15 +14,13 @@ class CommitNode:
     commit: git.Commit
     children: List["CommitNode"]
     is_hidden: bool
-    labels: Optional[List[str]]
+    label_set: Set[str]
 
-    def __init__(
-        self, commit: git.Commit, is_hidden: bool, labels: Optional[Iterable[str]]
-    ):
+    def __init__(self, commit: git.Commit, is_hidden: bool, label_set: Set[str]):
         self.commit = commit
         self.children = []
         self.is_hidden = is_hidden
-        self.labels = labels
+        self.label_set = label_set
 
     def print_tree(self) -> None:
         self._print_children(1)
@@ -53,8 +51,8 @@ class CommitNode:
             dot_char = "."
         else:
             dot_char = "*"
-        if self.labels:
-            label_str = " {" + ",".join(self.labels) + "}"
+        if self.label_set:
+            label_str = " {" + ",".join(self.label_set) + "}"
         else:
             label_str = ""
         print(f"{bars}{dot_char} {self.commit.hexsha[:8]}{label_str} {short_message}")
@@ -96,7 +94,7 @@ def build_tree(r: HeadyRepo) -> HeadyTree:
     for local_head in r.repo.heads:
         sha = local_head.commit.hexsha
         tip_shas.add(sha)
-        special_branches.setdefault(sha, set()).add(local_head.name)
+        special_branches.setdefault(sha, set()).add(local_head.path)
     for trunk_ref in r.trunk_refs:
         special_branches.setdefault(r.repo.commit(trunk_ref).hexsha, set()).add(
             trunk_ref
@@ -114,10 +112,13 @@ def build_tree(r: HeadyRepo) -> HeadyTree:
     ]
 
     def make_node(commit: git.Commit) -> CommitNode:
+        label_set = set(labels.get_labels(commit)) | special_branches.get(
+            commit.hexsha, set()
+        )
         return CommitNode(
             commit,
             is_hidden=commit.hexsha in hide_list_shas,
-            labels=special_branches.get(commit.hexsha, None),
+            label_set=label_set,
         )
 
     # build the node objects

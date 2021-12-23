@@ -35,7 +35,7 @@ def acquire_next_label(git_repo: git.Repo, label_prefix: str) -> str:
     latest_label_numbers[label_prefix] = new_number
 
     with _ensure_labels_file(git_repo).open("w") as f:
-        for label, number in latest_label_numbers:
+        for label, number in latest_label_numbers.items():
             f.write(f"{label} {number}\n")
 
     return f"{label_prefix}-{new_number}"
