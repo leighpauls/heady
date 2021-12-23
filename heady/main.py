@@ -186,6 +186,9 @@ def _move_commits_recursive(
     print(f"Cherry pick {source_sha}.")
     r.repo.git.cherry_pick(source_sha)
 
+    print(f'Hide {source_sha}')
+    config.append_to_hide_list(r.repo, [source_sha])
+
     base_commit = r.repo.head.commit
     for child_node in t.commit_nodes[source_sha].children:
         _move_commits_recursive(r, t, child_node.commit)
