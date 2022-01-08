@@ -1,7 +1,7 @@
 import argparse
 import pathlib
 from pprint import pprint
-from typing import List
+from typing import List, Set
 
 import git
 
@@ -56,6 +56,11 @@ def main() -> None:
     goto_parser.set_defaults(func=goto_cmd)
     goto_parser.add_argument("command", type=str, choices=["next", "prev", "tip"])
 
+    fixup_parser = subparsers.add_parser(
+        "fixup", help="Move children of any amended revisions of HEAD"
+    )
+    fixup_parser.set_defaults(func=fixup_cmd)
+
     args = parser.parse_args()
 
     original_repo_path = (
@@ -101,6 +106,10 @@ def move_cmd(r: HeadyRepo, args: argparse.Namespace) -> None:
 
 def goto_cmd(r: HeadyRepo, args: argparse.Namespace) -> None:
     goto_commit(r, args.command)
+
+
+def fixup_cmd(r: HeadyRepo, _args: argparse.Namespace) -> None:
+    fixup_commit(r)
 
 
 def hide_subtrees(r: HeadyRepo, hide_root_refs: List[str]) -> None:
@@ -214,6 +223,36 @@ def goto_commit(r: HeadyRepo, command: str) -> None:
             cur_node = cur_node.children[0]
         _visit_commit(r, cur_node.commit)
 
+
+def fixup_commit(r: HeadyRepo) -> None:
+    t = tree.build_tree(r)
+    starting_head_commit = r.repo.head.commit
+    head_commit_sha = r.repo.head.commit.hexsha
+
+    amend_source_sha = t.amend_source_map.get(head_commit_sha)
+    if not amend_source_sha:
+        print(f"No amend history found for {head_commit_sha}")
+        return
+
+    amend_source_children_shas: Set[str] = set()
+
+    while amend_source_sha:
+        source_node = t.commit_nodes.get(amend_source_sha)
+        if source_node:
+            visible_children_shas = {
+                ch.commit.hexsha for ch in source_node.children if not ch.is_hidden
+            }
+            amend_source_children_shas |= visible_children_shas
+        amend_source_sha = t.amend_source_map.get(amend_source_sha)
+
+    if not amend_source_children_shas:
+        print(f"No children found for amend history of {head_commit_sha}")
+        return
+
+    for source_child_sha in amend_source_children_shas:
+        _visit_commit(r, starting_head_commit)
+        _move_commits_recursive(r, t, t.commit_nodes[source_child_sha].commit)
+    _visit_commit(r, starting_head_commit)
 
 def _move_commits_recursive(
     r: HeadyRepo, t: tree.HeadyTree, source: git.Commit

@@ -15,7 +15,12 @@ class CommitNode:
     is_hidden: bool
     label_set: Set[str]
 
-    def __init__(self, commit: git.Commit, is_hidden: bool, label_set: Set[str]):
+    def __init__(
+        self,
+        commit: git.Commit,
+        is_hidden: bool,
+        label_set: Set[str],
+    ):
         self.commit = commit
         self.children = []
         self.is_hidden = is_hidden
@@ -61,6 +66,7 @@ class CommitNode:
 class HeadyTree:
     commit_nodes: Dict[str, CommitNode]
     trunk_nodes: List[CommitNode]
+    amend_source_map: Dict[str, str]
 
 
 def build_tree(r: HeadyRepo) -> HeadyTree:
@@ -72,6 +78,7 @@ def build_tree(r: HeadyRepo) -> HeadyTree:
     tip_shas = set()
 
     amended_shas = set()
+    amend_source_map = {}
 
     # Find tips from the reflog
     item: git.RefLogEntry
@@ -79,6 +86,7 @@ def build_tree(r: HeadyRepo) -> HeadyTree:
         # Hide shas which have been amended since the last time they were visited
         if item.message.startswith("commit (amend):"):
             amended_shas.add(item.oldhexsha)
+            amend_source_map[item.newhexsha] = item.oldhexsha
         time_seconds, _offset = item.time
         item_time = datetime.datetime.fromtimestamp(time_seconds)
         age = cur_time - item_time
@@ -143,7 +151,7 @@ def build_tree(r: HeadyRepo) -> HeadyTree:
     ordered_tree = sorted(
         trunk_nodes.values(), key=lambda n: n.commit.committed_datetime, reverse=True
     )
-    return HeadyTree(commit_nodes, ordered_tree)
+    return HeadyTree(commit_nodes, ordered_tree, amend_source_map)
 
 
 def collect_subtree_shas(node: CommitNode, dest: Set[str]) -> None:
