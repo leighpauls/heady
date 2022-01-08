@@ -280,7 +280,7 @@ def _visit_commit(r: HeadyRepo, dest: git.Commit) -> None:
     if r.repo.is_dirty():
         raise ValueError(f"Can't move while the repo is dirty.")
 
-    r.repo.head.reference = dest
+    r.repo.head.set_reference(dest, f"heady visit:{dest.hexsha}")
     r.repo.head.reset(index=True, working_tree=True)
 
 
