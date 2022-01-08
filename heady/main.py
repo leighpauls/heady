@@ -254,15 +254,21 @@ def fixup_commit(r: HeadyRepo) -> None:
         _move_commits_recursive(r, t, t.commit_nodes[source_child_sha].commit)
     _visit_commit(r, starting_head_commit)
 
+
 def _move_commits_recursive(
     r: HeadyRepo, t: tree.HeadyTree, source: git.Commit
 ) -> None:
     source_sha = source.hexsha
     print(f"Cherry pick {source_sha}.")
     r.repo.git.cherry_pick(source_sha)
+    new_commit = r.repo.head.commit
 
-    print(f"Hide {source_sha}")
-    config.append_to_hide_list(r.repo, [source_sha])
+    print(f"Record move {source_sha} to {new_commit.hexsha}")
+    # config.append_to_hide_list(r.repo, [source_sha])
+
+    # record the move by making a reflog entry
+    r.repo.head.set_reference(source_sha)
+    r.repo.head.set_reference(new_commit, f"heady move: {source_sha}")
 
     _move_children_to_head(r, t, source)
 

@@ -80,6 +80,9 @@ def build_tree(r: HeadyRepo) -> HeadyTree:
     amended_shas = set()
     amend_source_map = {}
 
+    moved_shas = set()
+    move_source_map = {}
+
     # Find tips from the reflog
     item: git.RefLogEntry
     for item in reversed(reflog):
@@ -87,13 +90,22 @@ def build_tree(r: HeadyRepo) -> HeadyTree:
         if item.message.startswith("commit (amend):"):
             amended_shas.add(item.oldhexsha)
             amend_source_map[item.newhexsha] = item.oldhexsha
+
+        if item.message.startswith("heady move:"):
+            moved_shas.add(item.oldhexsha)
+            move_source_map[item.newhexsha] = item.oldhexsha
+
         time_seconds, _offset = item.time
         item_time = datetime.datetime.fromtimestamp(time_seconds)
         age = cur_time - item_time
         if age > max_age:
             break
         item_sha = item.newhexsha
-        if item_sha not in hide_list_shas and item.newhexsha not in amended_shas:
+        if (
+            item_sha not in hide_list_shas
+            and item_sha not in amended_shas
+            and item_sha not in moved_shas
+        ):
             tip_shas.add(item_sha)
 
     # Find tips from special branches
@@ -122,7 +134,9 @@ def build_tree(r: HeadyRepo) -> HeadyTree:
         )
         return CommitNode(
             commit,
-            is_hidden=commit.hexsha in hide_list_shas,
+            is_hidden=commit.hexsha in hide_list_shas
+            or commit.hexsha in moved_shas
+            or commit.hexsha in amended_shas,
             label_set=label_set,
         )
 
