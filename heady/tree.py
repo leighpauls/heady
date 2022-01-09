@@ -4,7 +4,7 @@ from typing import Dict, List, Set
 
 import git
 
-from heady import config, labels
+from heady import config
 from heady.repo import HeadyRepo
 
 
@@ -13,18 +13,18 @@ class CommitNode:
     commit: git.Commit
     children: List["CommitNode"]
     is_hidden: bool
-    label_set: Set[str]
+    refs: Set[str]
 
     def __init__(
         self,
         commit: git.Commit,
         is_hidden: bool,
-        label_set: Set[str],
+        refs: Set[str],
     ):
         self.commit = commit
         self.children = []
         self.is_hidden = is_hidden
-        self.label_set = label_set
+        self.refs = refs
 
     def print_tree(self) -> None:
         self._print_children(1)
@@ -55,11 +55,11 @@ class CommitNode:
             dot_char = "."
         else:
             dot_char = "*"
-        if self.label_set:
-            label_str = " {" + ",".join(self.label_set) + "}"
+        if self.refs:
+            ref_str = " (" + ", ".join(self.refs) + ")"
         else:
-            label_str = ""
-        print(f"{bars}{dot_char} {self.commit.hexsha[:8]}{label_str} {short_message}")
+            ref_str = ""
+        print(f"{bars}{dot_char} {self.commit.hexsha[:8]}{ref_str} {short_message}")
 
 
 @dataclass
@@ -129,15 +129,13 @@ def build_tree(r: HeadyRepo) -> HeadyTree:
     ]
 
     def make_node(commit: git.Commit) -> CommitNode:
-        label_set = set(labels.get_labels(commit)) | special_branches.get(
-            commit.hexsha, set()
-        )
+        refs = set(get_upstreams(commit)) | special_branches.get(commit.hexsha, set())
         return CommitNode(
             commit,
             is_hidden=commit.hexsha in hide_list_shas
             or commit.hexsha in moved_shas
             or commit.hexsha in amended_shas,
-            label_set=label_set,
+            refs=refs,
         )
 
     # build the node objects
@@ -175,3 +173,12 @@ def collect_subtree_shas(node: CommitNode, dest: Set[str]) -> None:
     dest.add(sha)
     for child in node.children:
         collect_subtree_shas(child, dest)
+
+
+def get_upstreams(commit: git.Commit) -> List[str]:
+    result = []
+    for line in commit.message.split("\n"):
+        if not line.startswith("upstream:"):
+            continue
+        result.append(line.split(":", 1)[1].strip())
+    return result

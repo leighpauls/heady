@@ -1,5 +1,5 @@
 import pathlib
-from typing import Dict, Iterable, Set
+from typing import Iterable, Set
 
 import git
 
@@ -24,32 +24,8 @@ def replace_hide_list(git_repo: git.Repo, shas: Iterable[str]) -> None:
             f.write(f"{sha}\n")
 
 
-def acquire_next_label(git_repo: git.Repo, label_prefix: str) -> str:
-    latest_label_numbers: Dict[str, int] = {}
-    with _ensure_labels_file(git_repo).open("r") as f:
-        for line in f.readlines():
-            tokens = [t.strip() for t in line.split(" ")]
-            latest_label_numbers[tokens[0]] = int(tokens[1])
-
-    new_number = latest_label_numbers.get(label_prefix, 0) + 1
-    latest_label_numbers[label_prefix] = new_number
-
-    with _ensure_labels_file(git_repo).open("w") as f:
-        for label, number in latest_label_numbers.items():
-            f.write(f"{label} {number}\n")
-
-    return f"{label_prefix}-{new_number}"
-
-
 def _ensure_hide_list_file(git_repo: git.Repo) -> pathlib.Path:
     p = _ensure_config_directory(git_repo).joinpath("hidelist")
-    if not p.exists():
-        p.touch()
-    return p
-
-
-def _ensure_labels_file(git_repo: git.Repo) -> pathlib.Path:
-    p = _ensure_config_directory(git_repo).joinpath("labels")
     if not p.exists():
         p.touch()
     return p

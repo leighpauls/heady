@@ -1,11 +1,12 @@
 import argparse
 import pathlib
+import re
 from pprint import pprint
 from typing import List, Set
 
 import git
 
-from heady import config, labels, tree
+from heady import config, tree
 from heady.repo import HeadyRepo
 
 
@@ -38,11 +39,6 @@ def main() -> None:
     hide_parser.add_argument("revs", type=str, nargs="+")
     hide_parser.set_defaults(func=unhide_cmd)
 
-    label_parser = subparsers.add_parser("label", help="Apply labels to commits.")
-    label_parser.set_defaults(func=label_cmd)
-    label_parser.add_argument("label_prefix", type=str)
-    label_parser.add_argument("--rev", type=str, default="HEAD")
-
     move_parser = subparsers.add_parser("move", help="Move a subtree of commitss")
     move_parser.set_defaults(func=move_cmd)
     move_parser.add_argument(
@@ -60,6 +56,19 @@ def main() -> None:
         "fixup", help="Move children of any amended revisions of HEAD"
     )
     fixup_parser.set_defaults(func=fixup_cmd)
+
+    upstream_parser = subparsers.add_parser(
+        "upstream", help="Add an upstream branch to the commit."
+    )
+    upstream_parser.set_defaults(func=upstream_cmd)
+    upstream_parser.add_argument(
+        "upstream_ref",
+        type=str,
+        help="The upstream ref to target. In the form of <remote>/<branch>",
+    )
+    upstream_parser.add_argument(
+        "rev", type=str, default="HEAD", nargs="?", help="The local revision to label."
+    )
 
     args = parser.parse_args()
 
@@ -96,10 +105,6 @@ def unhide_cmd(r: HeadyRepo, args: argparse.Namespace) -> None:
     unhide_revs(r, revs)
 
 
-def label_cmd(r: HeadyRepo, args: argparse.Namespace) -> None:
-    label_rev(r, args.label_prefix, args.rev)
-
-
 def move_cmd(r: HeadyRepo, args: argparse.Namespace) -> None:
     move_commits(r, args.source_root, args.dest_parent)
 
@@ -110,6 +115,10 @@ def goto_cmd(r: HeadyRepo, args: argparse.Namespace) -> None:
 
 def fixup_cmd(r: HeadyRepo, _args: argparse.Namespace) -> None:
     fixup_commit(r)
+
+
+def upstream_cmd(r: HeadyRepo, args: argparse.Namespace) -> None:
+    add_upstream(r, args.upstream_ref, args.rev)
 
 
 def hide_subtrees(r: HeadyRepo, hide_root_refs: List[str]) -> None:
@@ -161,25 +170,34 @@ def unhide_revs(r: HeadyRepo, unhide_revs: List[str]) -> None:
     config.replace_hide_list(r.repo, new_hide_list)
 
 
-def label_rev(r: HeadyRepo, label_prefix: str, rev: str) -> None:
+def add_upstream(r: HeadyRepo, upstream_ref: str, rev: str) -> None:
     t = tree.build_tree(r)
 
     source_commit = r.repo.commit(rev)
     if is_in_trunk(r, rev):
-        raise ValueError(f"Can not label {rev} because it is in trunk.")
+        raise ValueError(f"Can not add upstream to {rev} because it is in trunk.")
 
     if source_commit.hexsha not in t.commit_nodes:
-        raise ValueError(f"Can not label {rev} because it is not visible in the tree")
+        raise ValueError(
+            f"Can not add upstream to {rev} because it is not visible in the tree"
+        )
 
-    if labels.get_labels(source_commit):
-        raise ValueError(f"Can not label {rev} because it already has a label.")
+    upstream_pattern = re.compile(r"^(?P<remote>.+?)/(?P<branch>.+)$")
+    upstream_parts = upstream_pattern.match(upstream_ref)
+    if upstream_parts is None:
+        raise ValueError(f"Upstream ref must be in the format <remote>/<branch>")
+    upstream_name = upstream_parts["remote"]
+
+    if upstream_name not in r.repo.remotes:
+        raise ValueError(f"Remote {upstream_name} not found.")
 
     _visit_commit(r, source_commit)
-    new_label = config.acquire_next_label(r.repo, label_prefix)
-    new_message = f"{source_commit.message}\nheady_label: {new_label}\n"
+    new_message = f"{source_commit.message}\nupstream: {upstream_ref}\n"
 
     r.repo.git.commit(message=new_message, amend=True, no_verify=True)
+    amended_commit = r.repo.head.commit
     _move_children_to_head(r, t, source_commit)
+    _visit_commit(r, amended_commit)
 
 
 def move_commits(r: HeadyRepo, source: str, dest: str) -> None:
