@@ -70,6 +70,19 @@ def main() -> None:
         "rev", type=str, default="HEAD", nargs="?", help="The local revision to label."
     )
 
+    push_parser = subparsers.add_parser(
+        "push", help="Push commits with upstreams in the specified subtree."
+    )
+    push_parser.set_defaults(func=push_cmd)
+    push_parser.add_argument("remote", type=str, help="Remote to push to.")
+    push_parser.add_argument(
+        "rev",
+        type=str,
+        default="HEAD",
+        nargs="?",
+        help="Push this commit and any children of this commit.",
+    )
+
     args = parser.parse_args()
 
     original_repo_path = (
@@ -119,6 +132,10 @@ def fixup_cmd(r: HeadyRepo, _args: argparse.Namespace) -> None:
 
 def upstream_cmd(r: HeadyRepo, args: argparse.Namespace) -> None:
     add_upstream(r, args.upstream_ref, args.rev)
+
+
+def push_cmd(r: HeadyRepo, args: argparse.Namespace) -> None:
+    push_commits(r, args.remote, args.rev)
 
 
 def hide_subtrees(r: HeadyRepo, hide_root_refs: List[str]) -> None:
@@ -271,6 +288,32 @@ def fixup_commit(r: HeadyRepo) -> None:
         _visit_commit(r, starting_head_commit)
         _move_commits_recursive(r, t, t.commit_nodes[source_child_sha].commit)
     _visit_commit(r, starting_head_commit)
+
+
+def push_commits(r: HeadyRepo, remote: str, rev: str) -> None:
+    t = tree.build_tree(r)
+
+    root_commit = r.repo.commit(rev)
+    root_node = t.commit_nodes.get(root_commit.hexsha)
+    if root_node is None:
+        raise ValueError(f"Did not find {rev} in tree.")
+
+    if remote not in r.repo.remotes:
+        raise ValueError(f"Remote {remote} not specified in this repository.")
+
+    push_order = _plan_push(remote, root_node)
+    r.repo.git.push(remote, *push_order, force_with_lease=True, no_verify=True)
+
+
+def _plan_push(remote: str, node: tree.CommitNode) -> List[str]:
+    result = []
+    for upstream in node.upstreams:
+        if upstream.startswith(f"{remote}/"):
+            remote_branch = upstream[upstream.find("/") + 1 :]
+            result.append(f"{node.commit.hexsha}:refs/heads/{remote_branch}")
+    for ch in node.children:
+        result.extend(_plan_push(remote, ch))
+    return result
 
 
 def _move_commits_recursive(

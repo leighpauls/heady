@@ -13,17 +13,20 @@ class CommitNode:
     commit: git.Commit
     children: List["CommitNode"]
     is_hidden: bool
+    upstreams: Set[str]
     refs: Set[str]
 
     def __init__(
         self,
         commit: git.Commit,
         is_hidden: bool,
+        upstreams: Set[str],
         refs: Set[str],
     ):
         self.commit = commit
         self.children = []
         self.is_hidden = is_hidden
+        self.upstreams = upstreams
         self.refs = refs
 
     def print_tree(self) -> None:
@@ -58,8 +61,8 @@ class CommitNode:
             dot_char = "."
         else:
             dot_char = "*"
-        if self.refs:
-            ref_str = " (" + ", ".join(self.refs) + ")"
+        if self.refs or self.upstreams:
+            ref_str = " (" + ", ".join(self.refs | self.upstreams) + ")"
         else:
             ref_str = ""
         print(f"{bars}{dot_char} {self.commit.hexsha[:8]}{ref_str} {short_message}")
@@ -132,13 +135,13 @@ def build_tree(r: HeadyRepo) -> HeadyTree:
     ]
 
     def make_node(commit: git.Commit) -> CommitNode:
-        refs = set(get_upstreams(commit)) | special_branches.get(commit.hexsha, set())
         return CommitNode(
             commit,
             is_hidden=commit.hexsha in hide_list_shas
             or commit.hexsha in moved_shas
             or commit.hexsha in amended_shas,
-            refs=refs,
+            upstreams=get_upstreams(commit),
+            refs=special_branches.get(commit.hexsha, set()),
         )
 
     # build the node objects
@@ -178,10 +181,10 @@ def collect_subtree_shas(node: CommitNode, dest: Set[str]) -> None:
         collect_subtree_shas(child, dest)
 
 
-def get_upstreams(commit: git.Commit) -> List[str]:
-    result = []
+def get_upstreams(commit: git.Commit) -> Set[str]:
+    result = set()
     for line in commit.message.split("\n"):
         if not line.startswith("upstream:"):
             continue
-        result.append(line.split(":", 1)[1].strip())
+        result.add(line.split(":", 1)[1].strip())
     return result
