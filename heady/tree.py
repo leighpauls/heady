@@ -38,7 +38,10 @@ class CommitNode:
         self._print_self(indent)
 
     def _print_children(self, indent: int) -> None:
-        for i, child in enumerate(self.children):
+        sorted_children: List[CommitNode] = sorted(
+            self.children, key=lambda node: node.commit.committed_date, reverse=True
+        )
+        for i, child in enumerate(sorted_children):
             child._print_tree(indent + i)
 
     def _print_splits(self, indent: int, num_splits: int) -> None:
