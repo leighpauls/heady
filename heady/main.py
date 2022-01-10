@@ -83,6 +83,12 @@ def main() -> None:
         help="Push this commit and any children of this commit.",
     )
 
+    pr_parser = subparsers.add_parser("pr", help="Provide link to create stacked PR.")
+    pr_parser.set_defaults(func=pr_cmd)
+    pr_parser.add_argument(
+        "rev", type=str, nargs="?", default="HEAD", help="Commit to create the PR of."
+    )
+
     args = parser.parse_args()
 
     original_repo_path = (
@@ -136,6 +142,10 @@ def upstream_cmd(r: HeadyRepo, args: argparse.Namespace) -> None:
 
 def push_cmd(r: HeadyRepo, args: argparse.Namespace) -> None:
     push_commits(r, args.remote, args.rev)
+
+
+def pr_cmd(r: HeadyRepo, args: argparse.Namespace) -> None:
+    print_pr_links(r, args.rev)
 
 
 def hide_subtrees(r: HeadyRepo, hide_root_refs: List[str]) -> None:
@@ -303,6 +313,42 @@ def push_commits(r: HeadyRepo, remote: str, rev: str) -> None:
 
     push_order = _plan_push(remote, root_node)
     r.repo.git.push(remote, *push_order, force_with_lease=True, no_verify=True)
+
+
+def print_pr_links(r: HeadyRepo, rev: str) -> None:
+    t = tree.build_tree(r)
+    target_commit = r.repo.commit(rev)
+    target_node = t.commit_nodes.get(target_commit.hexsha)
+    if not target_node:
+        raise ValueError(f"Could not find {rev} in tree.")
+    if not target_node.upstreams:
+        raise ValueError(f"Rev {rev} has no associated upstream branches.")
+
+    parent_commit_sha = target_commit.parents[0].hexsha
+
+    if is_in_trunk(r, parent_commit_sha):
+        for upstream in target_node.upstreams:
+            remote_branch = upstream[upstream.find("/") + 1 :]
+            print(
+                f"https://github.com/Nextdoor/nextdoor.com/compare/{remote_branch}?expand=1"
+            )
+        return
+
+    parent_commit_node = t.commit_nodes.get(parent_commit_sha)
+    if not parent_commit_node:
+        raise ValueError(f"Couldn't find suitable base branch from {parent_commit_sha}")
+    if not parent_commit_node.upstreams:
+        raise ValueError(
+            f"Parent commit {parent_commit_sha} has no associated upstream branches."
+        )
+
+    for upstream in target_node.upstreams:
+        remote_branch = upstream[upstream.find("/") + 1 :]
+        for parent_upstream in parent_commit_node.upstreams:
+            parent_remote_branch = parent_upstream[parent_upstream.find("/") + 1 :]
+            print(
+                f"https://github.com/Nextdoor/nextdoor.com/compare/{parent_remote_branch}...{remote_branch}?expand=1"
+            )
 
 
 def _plan_push(remote: str, node: tree.CommitNode) -> List[str]:
