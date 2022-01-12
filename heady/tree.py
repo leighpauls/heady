@@ -73,6 +73,7 @@ class HeadyTree:
     commit_nodes: Dict[str, CommitNode]
     trunk_nodes: List[CommitNode]
     amend_source_map: Dict[str, str]
+    visible_upstreams: Dict[str, List[str]]
 
 
 def build_tree(r: HeadyRepo) -> HeadyTree:
@@ -134,13 +135,23 @@ def build_tree(r: HeadyRepo) -> HeadyTree:
         r.repo.commit(sha) for sha in branch_commit_shas
     ]
 
+    visible_upstream_shas: Dict[str, List[str]] = {}
+
     def make_node(commit: git.Commit) -> CommitNode:
+        is_hidden = (
+            commit.hexsha in hide_list_shas
+            or commit.hexsha in moved_shas
+            or commit.hexsha in amended_shas
+        )
+        upstreams = get_upstreams(commit)
+        if upstreams and not is_hidden:
+            for upstream in upstreams:
+                sha_set = visible_upstream_shas.setdefault(upstream, [])
+                sha_set.append(commit.hexsha)
         return CommitNode(
             commit,
-            is_hidden=commit.hexsha in hide_list_shas
-            or commit.hexsha in moved_shas
-            or commit.hexsha in amended_shas,
-            upstreams=get_upstreams(commit),
+            is_hidden=is_hidden,
+            upstreams=upstreams,
             refs=special_branches.get(commit.hexsha, set()),
         )
 
@@ -169,7 +180,9 @@ def build_tree(r: HeadyRepo) -> HeadyTree:
     ordered_tree = sorted(
         trunk_nodes.values(), key=lambda n: n.commit.committed_datetime, reverse=True
     )
-    return HeadyTree(commit_nodes, ordered_tree, amend_source_map)
+    return HeadyTree(
+        commit_nodes, ordered_tree, amend_source_map, visible_upstream_shas
+    )
 
 
 def collect_subtree_shas(node: CommitNode, dest: Set[str]) -> None:

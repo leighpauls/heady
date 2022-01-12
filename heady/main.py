@@ -2,7 +2,7 @@ import argparse
 import pathlib
 import re
 from pprint import pprint
-from typing import List, Set
+from typing import List, Optional, Set
 
 import git
 
@@ -50,7 +50,16 @@ def main() -> None:
         "goto", help="Check out a revision using tree directions."
     )
     goto_parser.set_defaults(func=goto_cmd)
-    goto_parser.add_argument("command", type=str, choices=["next", "prev", "tip"])
+    goto_parser.add_argument(
+        "command", type=str, choices=["next", "prev", "tip", "upstream"]
+    )
+    goto_parser.add_argument(
+        "upstream",
+        type=str,
+        nargs="?",
+        default=None,
+        help="The upstream to goto. use with 'upstream' option",
+    )
 
     fixup_parser = subparsers.add_parser(
         "fixup", help="Move children of any amended revisions of HEAD"
@@ -129,7 +138,7 @@ def move_cmd(r: HeadyRepo, args: argparse.Namespace) -> None:
 
 
 def goto_cmd(r: HeadyRepo, args: argparse.Namespace) -> None:
-    goto_commit(r, args.command)
+    goto_commit(r, args.command, args.upstream)
 
 
 def fixup_cmd(r: HeadyRepo, _args: argparse.Namespace) -> None:
@@ -241,8 +250,27 @@ def move_commits(r: HeadyRepo, source: str, dest: str) -> None:
     _move_commits_recursive(r, t, source_commit)
 
 
-def goto_commit(r: HeadyRepo, command: str) -> None:
+def goto_commit(r: HeadyRepo, command: str, upstream: Optional[str]) -> None:
     t = tree.build_tree(r)
+
+    if command == "upstream":
+        if not upstream:
+            raise ValueError("No upstream provided.")
+        upstreams = t.visible_upstreams.get(upstream)
+        if not upstreams:
+            raise ValueError(
+                f"No vissible commits marked with upstream {upstream} found."
+            )
+        if len(upstreams) > 1:
+            raise ValueError(
+                f"Found multiple visible commits are marked with {upstream}. Hide all but one and try again: {upstreams}"
+            )
+        _visit_commit(r, t.commit_nodes[upstreams[0]].commit)
+        return
+    elif upstream is not None:
+        raise ValueError(
+            "<upstream> arg is only allowed for command 'goto upstream ...'"
+        )
 
     head_commit = r.repo.head.commit
     head_node = t.commit_nodes[head_commit.hexsha]
