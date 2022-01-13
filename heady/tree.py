@@ -61,11 +61,9 @@ class CommitNode:
             dot_char = "."
         else:
             dot_char = "*"
-        if self.refs or self.upstreams:
-            ref_str = " (" + ", ".join(self.refs | self.upstreams) + ")"
-        else:
-            ref_str = ""
-        print(f"{bars}{dot_char} {self.commit.hexsha[:8]}{ref_str} {short_message}")
+        upstream_str = " [" + ', '.join(self.upstreams) + "]" if self.upstreams else ""
+        ref_str = " (" + ", ".join(self.refs) + ")" if self.refs else ""
+        print(f"{bars}{dot_char} {self.commit.hexsha[:8]}{upstream_str}{ref_str} {short_message}")
 
 
 @dataclass

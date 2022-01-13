@@ -73,7 +73,7 @@ def main() -> None:
     upstream_parser.add_argument(
         "upstream_ref",
         type=str,
-        help="The upstream ref to target. In the form of <remote>/<branch>",
+        help="The upstream branch name to target.",
     )
     upstream_parser.add_argument(
         "rev", type=str, default="HEAD", nargs="?", help="The local revision to label."
@@ -218,15 +218,6 @@ def add_upstream(r: HeadyRepo, upstream_ref: str, rev: str) -> None:
             f"Can not add upstream to {rev} because it is not visible in the tree"
         )
 
-    upstream_pattern = re.compile(r"^(?P<remote>.+?)/(?P<branch>.+)$")
-    upstream_parts = upstream_pattern.match(upstream_ref)
-    if upstream_parts is None:
-        raise ValueError(f"Upstream ref must be in the format <remote>/<branch>")
-    upstream_name = upstream_parts["remote"]
-
-    if upstream_name not in r.repo.remotes:
-        raise ValueError(f"Remote {upstream_name} not found.")
-
     _visit_commit(r, source_commit)
     new_message = f"{source_commit.message}\nupstream: {upstream_ref}\n"
 
@@ -336,6 +327,7 @@ def push_commits(r: HeadyRepo, remote: str, rev: str) -> None:
     if root_node is None:
         raise ValueError(f"Did not find {rev} in tree.")
 
+    # TODO: no remotes in upstream names
     if remote not in r.repo.remotes:
         raise ValueError(f"Remote {remote} not specified in this repository.")
 
@@ -356,9 +348,8 @@ def print_pr_links(r: HeadyRepo, rev: str) -> None:
 
     if is_in_trunk(r, parent_commit_sha):
         for upstream in target_node.upstreams:
-            remote_branch = upstream[upstream.find("/") + 1 :]
             print(
-                f"https://github.com/Nextdoor/nextdoor.com/compare/{remote_branch}?expand=1"
+                f"https://github.com/Nextdoor/nextdoor.com/compare/{upstream}?expand=1"
             )
         return
 
@@ -371,20 +362,16 @@ def print_pr_links(r: HeadyRepo, rev: str) -> None:
         )
 
     for upstream in target_node.upstreams:
-        remote_branch = upstream[upstream.find("/") + 1 :]
         for parent_upstream in parent_commit_node.upstreams:
-            parent_remote_branch = parent_upstream[parent_upstream.find("/") + 1 :]
             print(
-                f"https://github.com/Nextdoor/nextdoor.com/compare/{parent_remote_branch}...{remote_branch}?expand=1"
+                f"https://github.com/Nextdoor/nextdoor.com/compare/{parent_upstream}...{upstream}?expand=1"
             )
 
 
 def _plan_push(remote: str, node: tree.CommitNode) -> List[str]:
     result = []
     for upstream in node.upstreams:
-        if upstream.startswith(f"{remote}/"):
-            remote_branch = upstream[upstream.find("/") + 1 :]
-            result.append(f"{node.commit.hexsha}:refs/heads/{remote_branch}")
+        result.append(f"{node.commit.hexsha}:refs/heads/{upstream}")
     for ch in node.children:
         result.extend(_plan_push(remote, ch))
     return result
