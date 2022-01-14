@@ -1,59 +1,50 @@
-import argparse
-import pathlib
-import re
 from pprint import pprint
 from typing import List, Optional, Set
 
 import git
 
-from heady import config, tree
+from heady import config, parsing, tree
 from heady.repo import HeadyRepo
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--repo",
-        default=None,
-        help="Location of the repo. Will use cwd if not provided.",
-    )
-    parser.add_argument(
-        "--trunk",
-        default="origin/main,origin/stable",
-        help="Trunk references. Comma separated. Usually origin/main or origin/master",
+    commands = parsing.Commands()
+
+    commands.add_subparser(
+        "tree",
+        help="Show the tree of visible heads.",
+        execute=lambda r, args: print_tips_tree(r),
     )
 
-    subparsers = parser.add_subparsers(dest="command", required=True)
-    tree_parser = subparsers.add_parser("tree", help="Show the tree of visible heads.")
-    tree_parser.set_defaults(func=tree_cmd)
+    commands.add_subparser(
+        "hide",
+        help="Hide the subtree from this revision",
+        execute=lambda r, args: hide_subtrees(r, args.revs),
+    ).add_argument("revs", type=str, nargs="+")
 
-    hide_parser = subparsers.add_parser(
-        "hide", help="Hide the subtree from this revision"
-    )
-    hide_parser.add_argument("revs", type=str, nargs="+")
-    hide_parser.set_defaults(func=hide_cmd)
+    commands.add_subparser(
+        "unhide",
+        help="Hide the subtree from this revision",
+        execute=lambda r, args: unhide_revs(r, args.revs),
+    ).add_argument("revs", type=str, nargs="+")
 
-    hide_parser = subparsers.add_parser(
-        "unhide", help="Hide the subtree from this revision"
-    )
-    hide_parser.add_argument("revs", type=str, nargs="+")
-    hide_parser.set_defaults(func=unhide_cmd)
-
-    move_parser = subparsers.add_parser("move", help="Move a subtree of commitss")
-    move_parser.set_defaults(func=move_cmd)
-    move_parser.add_argument(
+    commands.add_subparser(
+        "move",
+        help="Move a subtree of commitss",
+        execute=lambda r, args: move_commits(r, args.source_root, args.dest_parent),
+    ).add_argument(
         "source_root", type=str, help="Root of the subtree to move."
+    ).add_argument(
+        "dest_parent", type=str, help="New parent of the subtree."
     )
-    move_parser.add_argument("dest_parent", type=str, help="New parent of the subtree.")
 
-    goto_parser = subparsers.add_parser(
-        "goto", help="Check out a revision using tree directions."
-    )
-    goto_parser.set_defaults(func=goto_cmd)
-    goto_parser.add_argument(
+    commands.add_subparser(
+        "goto",
+        help="Check out a revision using tree directions.",
+        execute=lambda r, args: goto_commit(r, args.command, args.upstream),
+    ).add_argument(
         "command", type=str, choices=["next", "prev", "tip", "upstream"]
-    )
-    goto_parser.add_argument(
+    ).add_argument(
         "upstream",
         type=str,
         nargs="?",
@@ -61,30 +52,41 @@ def main() -> None:
         help="The upstream to goto. use with 'upstream' option",
     )
 
-    fixup_parser = subparsers.add_parser(
-        "fixup", help="Move children of any amended revisions of HEAD"
+    commands.add_subparser(
+        "fixup",
+        help="Move children of any amended revisions of HEAD",
+        execute=lambda r, args: fixup_commit(r),
     )
-    fixup_parser.set_defaults(func=fixup_cmd)
 
-    upstream_parser = subparsers.add_parser(
-        "upstream", help="Add an upstream branch to the commit."
-    )
-    upstream_parser.set_defaults(func=upstream_cmd)
-    upstream_parser.add_argument(
+    commands.add_subparser(
+        "upstream",
+        help="Add an upstream branch to the commit.",
+        execute=lambda r, args: add_upstream(r, args.upstream_ref, args.rev),
+    ).add_argument(
         "upstream_ref",
         type=str,
         help="The upstream branch name to target.",
-    )
-    upstream_parser.add_argument(
+    ).add_argument(
         "rev", type=str, default="HEAD", nargs="?", help="The local revision to label."
     )
 
-    push_parser = subparsers.add_parser(
-        "push", help="Push commits with upstreams in the specified subtree."
+    commands.add_subparser(
+        "upstream",
+        help="Add an upstream branch to the commit.",
+        execute=lambda r, args: add_upstream(r, args.upstream_ref, args.rev),
+    ).add_argument(
+        "upstream_ref",
+        type=str,
+        help="The upstream branch name to target.",
+    ).add_argument(
+        "rev", type=str, default="HEAD", nargs="?", help="The local revision to label."
     )
-    push_parser.set_defaults(func=push_cmd)
-    push_parser.add_argument("remote", type=str, help="Remote to push to.")
-    push_parser.add_argument(
+
+    commands.add_subparser(
+        "push",
+        help="Push commits with upstreams in the specified subtree.",
+        execute=lambda r, args: push_commits(r, args.remote, args.rev),
+    ).add_argument("remote", type=str, help="Remote to push to.").add_argument(
         "rev",
         type=str,
         default="HEAD",
@@ -92,69 +94,15 @@ def main() -> None:
         help="Push this commit and any children of this commit.",
     )
 
-    pr_parser = subparsers.add_parser("pr", help="Provide link to create stacked PR.")
-    pr_parser.set_defaults(func=pr_cmd)
-    pr_parser.add_argument(
+    commands.add_subparser(
+        "pr",
+        help="Provide link to create stacked PR.",
+        execute=lambda r, args: print_pr_links(r, args.rev),
+    ).add_argument(
         "rev", type=str, nargs="?", default="HEAD", help="Commit to create the PR of."
     )
 
-    args = parser.parse_args()
-
-    original_repo_path = (
-        pathlib.Path(args.repo).expanduser().resolve()
-        if args.repo
-        else pathlib.Path.cwd()
-    )
-    repo_path = original_repo_path
-
-    while True:
-        if repo_path.is_dir() and repo_path.joinpath(".git").exists():
-            break
-        if repo_path.parent == repo_path:
-            raise ValueError(f"No git repo present in {original_repo_path}")
-        repo_path = repo_path.parent
-
-    r = HeadyRepo(args.trunk.split(","), git.Repo(repo_path))
-
-    args.func(r, args)
-
-
-def tree_cmd(r: HeadyRepo, _args: argparse.Namespace) -> None:
-    print_tips_tree(r)
-
-
-def hide_cmd(r: HeadyRepo, args: argparse.Namespace) -> None:
-    revs: List[str] = args.revs
-    hide_subtrees(r, revs)
-
-
-def unhide_cmd(r: HeadyRepo, args: argparse.Namespace) -> None:
-    revs: List[str] = args.revs
-    unhide_revs(r, revs)
-
-
-def move_cmd(r: HeadyRepo, args: argparse.Namespace) -> None:
-    move_commits(r, args.source_root, args.dest_parent)
-
-
-def goto_cmd(r: HeadyRepo, args: argparse.Namespace) -> None:
-    goto_commit(r, args.command, args.upstream)
-
-
-def fixup_cmd(r: HeadyRepo, _args: argparse.Namespace) -> None:
-    fixup_commit(r)
-
-
-def upstream_cmd(r: HeadyRepo, args: argparse.Namespace) -> None:
-    add_upstream(r, args.upstream_ref, args.rev)
-
-
-def push_cmd(r: HeadyRepo, args: argparse.Namespace) -> None:
-    push_commits(r, args.remote, args.rev)
-
-
-def pr_cmd(r: HeadyRepo, args: argparse.Namespace) -> None:
-    print_pr_links(r, args.rev)
+    commands.execute()
 
 
 def hide_subtrees(r: HeadyRepo, hide_root_refs: List[str]) -> None:
