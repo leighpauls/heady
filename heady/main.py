@@ -332,6 +332,9 @@ def push_commits(r: HeadyRepo, remote: str, rev: str) -> None:
         raise ValueError(f"Remote {remote} not specified in this repository.")
 
     push_order = _plan_push(remote, root_node)
+    print("Pushing:")
+    for p in push_order:
+        print(p)
     r.repo.git.push(remote, *push_order, force_with_lease=True, no_verify=True)
 
 
