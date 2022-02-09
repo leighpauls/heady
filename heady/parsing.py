@@ -49,7 +49,19 @@ class Commands:
                 raise ValueError(f"No git repo present in {original_repo_path}")
             repo_path = repo_path.parent
 
-        r = repo.HeadyRepo(args.trunk.split(","), git.Repo(repo_path))
+        git_repo = git.Repo(repo_path)
+        trunks = []
+        for t in args.trunk.split(","):
+            try:
+                git_repo.commit(t)
+                trunks.append(t)
+            except git.BadName:
+                pass
+
+        if not trunks:
+            raise ValueError(f"Unable to find any trunks from {args.trunk}")
+
+        r = repo.HeadyRepo(trunks, git_repo)
         args.func(r, args)
 
 
