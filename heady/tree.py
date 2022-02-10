@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Set
 
 import git
+import humanize
 
 from heady import config
 from heady.repo import HeadyRepo
@@ -63,7 +64,11 @@ class CommitNode:
             dot_char = "*"
         upstream_str = " [" + ', '.join(self.upstreams) + "]" if self.upstreams else ""
         ref_str = " (" + ", ".join(self.refs) + ")" if self.refs else ""
-        print(f"{bars}{dot_char} {self.commit.hexsha[:8]}{upstream_str}{ref_str} {short_message}")
+        hex_str = self.commit.hexsha[:8]
+
+        age = datetime.datetime.now() - datetime.datetime.fromtimestamp(self.commit.committed_date)
+        print(f"{bars}{dot_char} {hex_str}{upstream_str}{ref_str} {humanize.naturaltime(age)}")
+        print(f"{bars}| {' ' * len(hex_str)} {short_message}")
 
 
 @dataclass
