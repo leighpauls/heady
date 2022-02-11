@@ -86,7 +86,9 @@ def main() -> None:
         "push",
         help="Push commits with upstreams in the specified subtree.",
         execute=lambda r, args: push_commits(r, args.remote, args.rev),
-    ).add_argument("remote", type=str, help="Remote to push to.").add_argument(
+    ).add_argument(
+        "--remote", type=str, default="origin", help="Remote to push to."
+    ).add_argument(
         "rev",
         type=str,
         default="HEAD",
@@ -100,6 +102,12 @@ def main() -> None:
         execute=lambda r, args: print_pr_links(r, args.rev),
     ).add_argument(
         "rev", type=str, nargs="?", default="HEAD", help="Commit to create the PR of."
+    )
+
+    commands.add_subparser(
+        "autohide",
+        help="Hide commits whose upstreams are merged to trunk.",
+        execute=lambda r, args: auto_hide(r),
     )
 
     commands.execute()
@@ -275,7 +283,6 @@ def push_commits(r: HeadyRepo, remote: str, rev: str) -> None:
     if root_node is None:
         raise ValueError(f"Did not find {rev} in tree.")
 
-    # TODO: no remotes in upstream names
     if remote not in r.repo.remotes:
         raise ValueError(f"Remote {remote} not specified in this repository.")
 
@@ -317,6 +324,11 @@ def print_pr_links(r: HeadyRepo, rev: str) -> None:
             print(
                 f"https://github.com/Nextdoor/nextdoor.com/compare/{parent_upstream}...{upstream}?expand=1"
             )
+
+
+def auto_hide(r: HeadyRepo) -> None:
+    t = tree.build_tree(r)
+    print(tree.collect_merged_upstreams(r, t.trunk_nodes[-1].commit))
 
 
 def _plan_push(remote: str, node: tree.CommitNode) -> List[str]:
@@ -380,8 +392,7 @@ def is_ancestor(r: HeadyRepo, ancestor_ref: str, descendent_ref: str) -> bool:
 
 def print_tips_tree(r: HeadyRepo) -> None:
     t = tree.build_tree(r)
-    for node in t.trunk_nodes:
-        node.print_tree()
+    tree.print_tree(r, t)
 
 
 if __name__ == "__main__":

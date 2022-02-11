@@ -16,6 +16,7 @@ class CommitNode:
     is_hidden: bool
     upstreams: Set[str]
     refs: Set[str]
+    merged_upstream_shas: Set[str]
 
     def __init__(
         self,
@@ -29,6 +30,7 @@ class CommitNode:
         self.is_hidden = is_hidden
         self.upstreams = upstreams
         self.refs = refs
+        self.merged_upstream_shas = set()
 
     def print_tree(self) -> None:
         self._print_children(1)
@@ -60,14 +62,27 @@ class CommitNode:
             dot_char = "@"
         elif self.is_hidden:
             dot_char = "."
+        elif self.merged_upstream_shas:
+            dot_char = "x"
         else:
             dot_char = "*"
-        upstream_str = " [" + ', '.join(self.upstreams) + "]" if self.upstreams else ""
+
+        upstream_str = " [" + ", ".join(self.upstreams) + "]" if self.upstreams else ""
         ref_str = " (" + ", ".join(self.refs) + ")" if self.refs else ""
         hex_str = self.commit.hexsha[:8]
+        age = datetime.datetime.now() - datetime.datetime.fromtimestamp(
+            self.commit.committed_date
+        )
+        merged_as_str = (
+            "| merged as: "
+            + ", ".join([merged_sha[:8] for merged_sha in self.merged_upstream_shas])
+            if self.merged_upstream_shas
+            else ""
+        )
 
-        age = datetime.datetime.now() - datetime.datetime.fromtimestamp(self.commit.committed_date)
-        print(f"{bars}{dot_char} {hex_str}{upstream_str}{ref_str} {humanize.naturaltime(age)}")
+        print(
+            f"{bars}{dot_char} {hex_str}{upstream_str}{ref_str} {humanize.naturaltime(age)} {merged_as_str}"
+        )
         print(f"{bars}| {' ' * len(hex_str)} {short_message}")
 
 
@@ -183,9 +198,24 @@ def build_tree(r: HeadyRepo) -> HeadyTree:
     ordered_tree = sorted(
         trunk_nodes.values(), key=lambda n: n.commit.committed_datetime, reverse=True
     )
+
+    oldest_trunk_node = ordered_tree[-1]
+    merged_upstreams = collect_merged_upstreams(r, oldest_trunk_node.commit)
+
+    for commit_node in commit_nodes.values():
+        for upstream_name in commit_node.upstreams:
+            commit_node.merged_upstream_shas.update(
+                merged_upstreams.get(upstream_name, [])
+            )
+
     return HeadyTree(
         commit_nodes, ordered_tree, amend_source_map, visible_upstream_shas
     )
+
+
+def print_tree(r: HeadyRepo, t: HeadyTree) -> None:
+    for node in t.trunk_nodes:
+        node.print_tree()
 
 
 def collect_subtree_shas(node: CommitNode, dest: Set[str]) -> None:
@@ -204,3 +234,25 @@ def get_upstreams(commit: git.Commit) -> Set[str]:
             continue
         result.add(line.split(":", 1)[1].strip())
     return result
+
+
+def collect_merged_upstreams(
+    r: HeadyRepo, oldest_trunk_commit: git.Commit
+) -> Dict[str, List[str]]:
+    """Returns a map of upstream name to merged commit."""
+    trunk_parent_sha = oldest_trunk_commit.parents[0].hexsha
+
+    visited_trunk_shas = set()
+    upstreams_in_trunk = {}
+    for trunk_ref in r.trunk_refs:
+        for trunk_commit in r.repo.iter_commits(f"{trunk_parent_sha}..{trunk_ref}"):
+            trunk_commit_sha = trunk_commit.hexsha
+            if trunk_commit_sha in visited_trunk_shas:
+                continue
+            visited_trunk_shas.add(trunk_commit_sha)
+
+            for upstream_name in get_upstreams(trunk_commit):
+                commit_list = upstreams_in_trunk.setdefault(upstream_name, [])
+                commit_list.append(trunk_commit.hexsha)
+
+    return upstreams_in_trunk
