@@ -1,6 +1,6 @@
 import datetime
 from dataclasses import dataclass
-from typing import Dict, List, Set
+from typing import Dict, List, Optional, Set
 
 import git
 import humanize
@@ -9,12 +9,18 @@ from heady import config
 from heady.repo import HeadyRepo
 
 
+@dataclass(frozen=True)
+class Upstream:
+    name: str
+    remote_sha: Optional[str]
+
+
 @dataclass
 class CommitNode:
     commit: git.Commit
     children: List["CommitNode"]
     is_hidden: bool
-    upstreams: Set[str]
+    upstreams: Set[Upstream]
     refs: Set[str]
     merged_upstream_shas: Set[str]
 
@@ -22,7 +28,7 @@ class CommitNode:
         self,
         commit: git.Commit,
         is_hidden: bool,
-        upstreams: Set[str],
+        upstreams: Set[Upstream],
         refs: Set[str],
     ):
         self.commit = commit
@@ -67,21 +73,35 @@ class CommitNode:
         else:
             dot_char = "*"
 
-        upstream_str = " [" + ", ".join(self.upstreams) + "]" if self.upstreams else ""
+        upstream_names = [u.name for u in self.upstreams]
+        upstream_str = " [" + ", ".join(upstream_names) + "]" if upstream_names else ""
         ref_str = " (" + ", ".join(self.refs) + ")" if self.refs else ""
         hex_str = self.commit.hexsha[:8]
-        age = datetime.datetime.now() - datetime.datetime.fromtimestamp(
-            self.commit.committed_date
-        )
-        merged_as_str = (
-            "| merged as: "
-            + ", ".join([merged_sha[:8] for merged_sha in self.merged_upstream_shas])
-            if self.merged_upstream_shas
-            else ""
+        age_string = humanize.naturaltime(
+            datetime.datetime.now()
+            - datetime.datetime.fromtimestamp(self.commit.committed_date)
         )
 
+        upstream_info_str = ""
+        if self.merged_upstream_shas:
+            upstream_info_str = (
+                "| merged as: "
+                + ", ".join(
+                    [merged_sha[:8] for merged_sha in self.merged_upstream_shas]
+                )
+                if self.merged_upstream_shas
+                else ""
+            )
+        elif self.upstreams:
+            if sum(up.remote_sha is None for up in self.upstreams):
+                upstream_info_str = "| Unpushed"
+            elif sum(up.remote_sha != self.commit.hexsha for up in self.upstreams):
+                upstream_info_str = "| Needs Push"
+            else:
+                upstream_info_str = "| Up-to-date"
+
         print(
-            f"{bars}{dot_char} {hex_str}{upstream_str}{ref_str} {humanize.naturaltime(age)} {merged_as_str}"
+            f"{bars}{dot_char} {hex_str}{upstream_str}{ref_str} {age_string} {upstream_info_str}"
         )
         print(f"{bars}| {' ' * len(hex_str)} {short_message}")
 
@@ -161,11 +181,21 @@ def build_tree(r: HeadyRepo) -> HeadyTree:
             or commit.hexsha in moved_shas
             or commit.hexsha in amended_shas
         )
-        upstreams = get_upstreams(commit)
-        if upstreams and not is_hidden:
-            for upstream in upstreams:
-                sha_set = visible_upstream_shas.setdefault(upstream, [])
+        upstream_names = get_upstream_names(commit)
+
+        upstreams = set()
+        for upstream_name in upstream_names:
+            if not is_hidden:
+                sha_set = visible_upstream_shas.setdefault(upstream_name, [])
                 sha_set.append(commit.hexsha)
+
+            try:
+                upstream_commit = r.repo.commit(f"{r.remote}/{upstream_name}")
+            except git.BadObject:
+                upstreams.add(Upstream(upstream_name, None))
+            else:
+                upstreams.add(Upstream(upstream_name, upstream_commit.hexsha))
+
         return CommitNode(
             commit,
             is_hidden=is_hidden,
@@ -203,9 +233,9 @@ def build_tree(r: HeadyRepo) -> HeadyTree:
     merged_upstreams = collect_merged_upstreams(r, oldest_trunk_node.commit)
 
     for commit_node in commit_nodes.values():
-        for upstream_name in commit_node.upstreams:
+        for upstream in commit_node.upstreams:
             commit_node.merged_upstream_shas.update(
-                merged_upstreams.get(upstream_name, [])
+                merged_upstreams.get(upstream.name, [])
             )
 
     return HeadyTree(
@@ -227,7 +257,7 @@ def collect_subtree_shas(node: CommitNode, dest: Set[str]) -> None:
         collect_subtree_shas(child, dest)
 
 
-def get_upstreams(commit: git.Commit) -> Set[str]:
+def get_upstream_names(commit: git.Commit) -> Set[str]:
     result = set()
     for line in commit.message.split("\n"):
         if not line.startswith("upstream:"):
@@ -251,7 +281,7 @@ def collect_merged_upstreams(
                 continue
             visited_trunk_shas.add(trunk_commit_sha)
 
-            for upstream_name in get_upstreams(trunk_commit):
+            for upstream_name in get_upstream_names(trunk_commit):
                 commit_list = upstreams_in_trunk.setdefault(upstream_name, [])
                 commit_list.append(trunk_commit.hexsha)
 

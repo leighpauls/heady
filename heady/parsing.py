@@ -20,6 +20,9 @@ class Commands:
             default="origin/main,origin/stable",
             help="Trunk references. Comma separated. Usually origin/main or origin/master",
         )
+        self.parser.add_argument(
+            "--remote", type=str, default="origin", help="Remote used for upstreaming."
+        )
 
         self.subparsers = self.parser.add_subparsers(dest="command", required=True)
 
@@ -61,7 +64,7 @@ class Commands:
         if not trunks:
             raise ValueError(f"Unable to find any trunks from {args.trunk}")
 
-        r = repo.HeadyRepo(trunks, git_repo)
+        r = repo.HeadyRepo(trunks, git_repo, args.remote)
         args.func(r, args)
 
 

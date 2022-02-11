@@ -85,9 +85,7 @@ def main() -> None:
     commands.add_subparser(
         "push",
         help="Push commits with upstreams in the specified subtree.",
-        execute=lambda r, args: push_commits(r, args.remote, args.rev),
-    ).add_argument(
-        "--remote", type=str, default="origin", help="Remote to push to."
+        execute=lambda r, args: push_commits(r, args.rev),
     ).add_argument(
         "rev",
         type=str,
@@ -275,7 +273,7 @@ def fixup_commit(r: HeadyRepo) -> None:
     _visit_commit(r, starting_head_commit)
 
 
-def push_commits(r: HeadyRepo, remote: str, rev: str) -> None:
+def push_commits(r: HeadyRepo, rev: str) -> None:
     t = tree.build_tree(r)
 
     root_commit = r.repo.commit(rev)
@@ -283,14 +281,11 @@ def push_commits(r: HeadyRepo, remote: str, rev: str) -> None:
     if root_node is None:
         raise ValueError(f"Did not find {rev} in tree.")
 
-    if remote not in r.repo.remotes:
-        raise ValueError(f"Remote {remote} not specified in this repository.")
-
-    push_order = _plan_push(remote, root_node)
+    push_order = _plan_push(r.remote, root_node)
     print("Pushing:")
     for p in push_order:
         print(p)
-    r.repo.git.push(remote, *push_order, force_with_lease=True, no_verify=True)
+    r.repo.git.push(r.remote, *push_order, force_with_lease=True, no_verify=True)
 
 
 def print_pr_links(r: HeadyRepo, rev: str) -> None:
@@ -307,7 +302,7 @@ def print_pr_links(r: HeadyRepo, rev: str) -> None:
     if is_in_trunk(r, parent_commit_sha):
         for upstream in target_node.upstreams:
             print(
-                f"https://github.com/Nextdoor/nextdoor.com/compare/{upstream}?expand=1"
+                f"https://github.com/Nextdoor/nextdoor.com/compare/{upstream.name}?expand=1"
             )
         return
 
@@ -322,7 +317,7 @@ def print_pr_links(r: HeadyRepo, rev: str) -> None:
     for upstream in target_node.upstreams:
         for parent_upstream in parent_commit_node.upstreams:
             print(
-                f"https://github.com/Nextdoor/nextdoor.com/compare/{parent_upstream}...{upstream}?expand=1"
+                f"https://github.com/Nextdoor/nextdoor.com/compare/{parent_upstream.name}...{upstream.name}?expand=1"
             )
 
 
@@ -342,7 +337,7 @@ def auto_hide(r: HeadyRepo) -> None:
 def _plan_push(remote: str, node: tree.CommitNode) -> List[str]:
     result = []
     for upstream in node.upstreams:
-        result.append(f"{node.commit.hexsha}:refs/heads/{upstream}")
+        result.append(f"{node.commit.hexsha}:refs/heads/{upstream.name}")
     for ch in node.children:
         result.extend(_plan_push(remote, ch))
     return result

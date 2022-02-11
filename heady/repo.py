@@ -8,3 +8,4 @@ import git
 class HeadyRepo:
     trunk_refs: List[str]
     repo: git.Repo
+    remote: str
