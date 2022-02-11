@@ -328,7 +328,15 @@ def print_pr_links(r: HeadyRepo, rev: str) -> None:
 
 def auto_hide(r: HeadyRepo) -> None:
     t = tree.build_tree(r)
-    print(tree.collect_merged_upstreams(r, t.trunk_nodes[-1].commit))
+
+    to_remove = set()
+    for commit_sha, commit_node in t.commit_nodes.items():
+        if commit_node.merged_upstream_shas:
+            print(f"Hiding {commit_sha}: {commit_node.upstreams}")
+            to_remove.add(commit_sha)
+
+    if to_remove:
+        config.append_to_hide_list(r.repo, to_remove)
 
 
 def _plan_push(remote: str, node: tree.CommitNode) -> List[str]:
