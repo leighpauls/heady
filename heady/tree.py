@@ -23,6 +23,7 @@ class CommitNode:
     upstreams: Set[Upstream]
     refs: Set[str]
     merged_upstream_shas: Set[str]
+    in_trunk: bool
 
     def __init__(
         self,
@@ -30,6 +31,7 @@ class CommitNode:
         is_hidden: bool,
         upstreams: Set[Upstream],
         refs: Set[str],
+        in_trunk: bool
     ):
         self.commit = commit
         self.children = []
@@ -37,6 +39,7 @@ class CommitNode:
         self.upstreams = upstreams
         self.refs = refs
         self.merged_upstream_shas = set()
+        self.in_trunk = in_trunk
 
     def print_tree(self) -> None:
         self._print_children(1)
@@ -66,6 +69,8 @@ class CommitNode:
         short_message = self.commit.message.split("\n", 1)[0]
         if self.commit.repo.head.commit == self.commit:
             dot_char = "@"
+        elif self.in_trunk:
+            dot_char = "o"
         elif self.is_hidden:
             dot_char = "."
         elif self.merged_upstream_shas:
@@ -83,22 +88,23 @@ class CommitNode:
         )
 
         upstream_info_str = ""
-        if self.merged_upstream_shas:
-            upstream_info_str = (
-                "| merged as: "
-                + ", ".join(
-                    [merged_sha[:8] for merged_sha in self.merged_upstream_shas]
+        if not self.in_trunk:
+            if self.merged_upstream_shas:
+                upstream_info_str = (
+                    "| merged as: "
+                    + ", ".join(
+                        [merged_sha[:8] for merged_sha in self.merged_upstream_shas]
+                    )
+                    if self.merged_upstream_shas
+                    else ""
                 )
-                if self.merged_upstream_shas
-                else ""
-            )
-        elif self.upstreams:
-            if sum(up.remote_sha is None for up in self.upstreams):
-                upstream_info_str = "| Unpushed"
-            elif sum(up.remote_sha != self.commit.hexsha for up in self.upstreams):
-                upstream_info_str = "| Needs Push"
-            else:
-                upstream_info_str = "| Up-to-date"
+            elif self.upstreams:
+                if sum(up.remote_sha is None for up in self.upstreams):
+                    upstream_info_str = "| Not in remote"
+                elif sum(up.remote_sha != self.commit.hexsha for up in self.upstreams):
+                    upstream_info_str = "| Remote differs"
+                else:
+                    upstream_info_str = "| Remote up-to-date"
 
         print(
             f"{bars}{dot_char} {hex_str}{upstream_str}{ref_str} {age_string} {upstream_info_str}"
@@ -175,7 +181,7 @@ def build_tree(r: HeadyRepo) -> HeadyTree:
 
     visible_upstream_shas: Dict[str, List[str]] = {}
 
-    def make_node(commit: git.Commit) -> CommitNode:
+    def make_node(commit: git.Commit, in_trunk: bool) -> CommitNode:
         is_hidden = (
             commit.hexsha in hide_list_shas
             or commit.hexsha in moved_shas
@@ -191,7 +197,7 @@ def build_tree(r: HeadyRepo) -> HeadyTree:
 
             try:
                 upstream_commit = r.repo.commit(f"{r.remote}/{upstream_name}")
-            except git.BadObject:
+            except (git.BadObject, git.BadName):
                 upstreams.add(Upstream(upstream_name, None))
             else:
                 upstreams.add(Upstream(upstream_name, upstream_commit.hexsha))
@@ -201,18 +207,19 @@ def build_tree(r: HeadyRepo) -> HeadyTree:
             is_hidden=is_hidden,
             upstreams=upstreams,
             refs=special_branches.get(commit.hexsha, set()),
+            in_trunk=in_trunk
         )
 
     # build the node objects
     commit_nodes: Dict[str, CommitNode] = {}
     for bc in branch_commits:
-        commit_nodes[bc.hexsha] = make_node(bc)
+        commit_nodes[bc.hexsha] = make_node(bc, False)
 
     # Add the trunk nodes
     trunk_nodes: Dict[str, CommitNode] = {}
     for trunk_ref in r.trunk_refs:
         trunk_commit = r.repo.commit(trunk_ref)
-        trunk_nodes[trunk_commit.hexsha] = make_node(trunk_commit)
+        trunk_nodes[trunk_commit.hexsha] = make_node(trunk_commit, True)
 
     # link the node objects
     for node in commit_nodes.values():
@@ -220,7 +227,7 @@ def build_tree(r: HeadyRepo) -> HeadyTree:
         parent_sha = parent_commit.hexsha
         if parent_sha not in commit_nodes:
             if parent_sha not in trunk_nodes:
-                trunk_nodes[parent_sha] = make_node(parent_commit)
+                trunk_nodes[parent_sha] = make_node(parent_commit, True)
             trunk_nodes[parent_sha].children.append(node)
         else:
             commit_nodes[parent_sha].children.append(node)
