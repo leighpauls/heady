@@ -5,7 +5,7 @@ description = ""
 authors = ["Leigh Pauls <leigh@nextdoor.com>"]
 
 [tool.poetry.dependencies]
-python = "^3.8"
+python = "^3.10"
 black = "^21.10b0"
 isort = "^5.10.1"
 GitPython = "^3.1.24"
