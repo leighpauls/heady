@@ -110,6 +110,7 @@ class CommitNode:
             f"{bars}{dot_char} {hex_str}{upstream_str}{ref_str} {age_string} {upstream_info_str}"
         )
         print(f"{bars}| {' ' * len(hex_str)} {short_message}")
+        print(f"{bars}| ")
 
 
 @dataclass
