@@ -13,6 +13,7 @@ from heady.repo import HeadyRepo
 class Upstream:
     name: str
     remote_sha: Optional[str]
+    remote_commit_datetime: Optional[datetime.datetime]
 
 
 @dataclass
@@ -31,7 +32,7 @@ class CommitNode:
         is_hidden: bool,
         upstreams: Set[Upstream],
         refs: Set[str],
-        in_trunk: bool
+        in_trunk: bool,
     ):
         self.commit = commit
         self.children = []
@@ -102,7 +103,14 @@ class CommitNode:
                 if sum(up.remote_sha is None for up in self.upstreams):
                     upstream_info_str = "| Not in remote"
                 elif sum(up.remote_sha != self.commit.hexsha for up in self.upstreams):
-                    upstream_info_str = "| Remote differs"
+                    if sum(
+                        up.remote_commit_datetime
+                        and self.commit.committed_datetime > up.remote_commit_datetime
+                        for up in self.upstreams
+                    ):
+                        upstream_info_str = "| Remote Older"
+                    else:
+                        upstream_info_str = "| Remote Newer"
                 else:
                     upstream_info_str = "| Remote up-to-date"
 
@@ -199,16 +207,22 @@ def build_tree(r: HeadyRepo) -> HeadyTree:
             try:
                 upstream_commit = r.repo.commit(f"{r.remote}/{upstream_name}")
             except (git.BadObject, git.BadName):
-                upstreams.add(Upstream(upstream_name, None))
+                upstreams.add(Upstream(upstream_name, None, None))
             else:
-                upstreams.add(Upstream(upstream_name, upstream_commit.hexsha))
+                upstreams.add(
+                    Upstream(
+                        upstream_name,
+                        upstream_commit.hexsha,
+                        upstream_commit.committed_datetime,
+                    )
+                )
 
         return CommitNode(
             commit,
             is_hidden=is_hidden,
             upstreams=upstreams,
             refs=special_branches.get(commit.hexsha, set()),
-            in_trunk=in_trunk
+            in_trunk=in_trunk,
         )
 
     # build the node objects
