@@ -43,22 +43,31 @@ class CommitNode:
         self.in_trunk = in_trunk
 
     def print_tree(self) -> None:
-        self._print_children(1)
-        self._print_splits(0, len(self.children))
+        self._print_many_children(0)
         self._print_self(0)
         print(":")
 
     def _print_tree(self, indent: int) -> None:
         self._print_children(indent)
-        self._print_splits(indent, len(self.children) - 1)
         self._print_self(indent)
 
     def _print_children(self, indent: int) -> None:
+        if len(self.children) == 1:
+            self._print_single_child(indent)
+        elif len(self.children) > 1:
+            self._print_many_children(indent)
+
+    def _print_single_child(self, indent: int) -> None:
+        self.children[0]._print_tree(indent)
+
+    def _print_many_children(self, indent: int) -> None:
         sorted_children: List[CommitNode] = sorted(
             self.children, key=lambda node: node.commit.committed_date, reverse=True
         )
-        for i, child in enumerate(sorted_children):
-            child._print_tree(indent + i)
+        for child in sorted_children:
+            child._print_tree(indent+1)
+            bars = "| " * indent
+            print(bars + "|/")
 
     def _print_splits(self, indent: int, num_splits: int) -> None:
         for i in range(indent + num_splits, indent, -1):
