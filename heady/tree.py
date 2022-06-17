@@ -43,39 +43,35 @@ class CommitNode:
         self.in_trunk = in_trunk
 
     def print_tree(self) -> None:
-        self._print_many_children(0)
-        self._print_self(0)
+        self._print_many_children('')
+        self._print_self('')
         print(":")
 
-    def _print_tree(self, indent: int) -> None:
+    def _print_tree(self, indent: str) -> None:
         self._print_children(indent)
         self._print_self(indent)
 
-    def _print_children(self, indent: int) -> None:
+    def _print_children(self, indent: str) -> None:
         if len(self.children) == 1:
             self._print_single_child(indent)
         elif len(self.children) > 1:
             self._print_many_children(indent)
 
-    def _print_single_child(self, indent: int) -> None:
+    def _print_single_child(self, indent: str) -> None:
         self.children[0]._print_tree(indent)
 
-    def _print_many_children(self, indent: int) -> None:
-        sorted_children: List[CommitNode] = sorted(
+    def _print_many_children(self, indent: str) -> None:
+        sorted_children: List[CommitNode] = list(sorted(
             self.children, key=lambda node: node.commit.committed_date, reverse=True
-        )
+        ))
+        is_first = not self.in_trunk
         for child in sorted_children:
-            child._print_tree(indent+1)
-            bars = "| " * indent
-            print(bars + "|/")
+            new_indent = ' ' if is_first else '|'
+            child._print_tree(indent+new_indent+' ')
+            print(indent + new_indent + "/")
+            is_first = False
 
-    def _print_splits(self, indent: int, num_splits: int) -> None:
-        for i in range(indent + num_splits, indent, -1):
-            bars = "| " * (i - 1)
-            print(f"{bars}|/")
-
-    def _print_self(self, indent: int) -> None:
-        bars = "| " * indent
+    def _print_self(self, indent: str) -> None:
         short_message = self.commit.message.split("\n", 1)[0]
         if self.commit.repo.head.commit == self.commit:
             dot_char = "@"
@@ -124,10 +120,10 @@ class CommitNode:
                     upstream_info_str = "| Remote up-to-date"
 
         print(
-            f"{bars}{dot_char} {hex_str}{upstream_str}{ref_str} {age_string} {upstream_info_str}"
+            f"{indent}{dot_char} {hex_str}{upstream_str}{ref_str} {age_string} {upstream_info_str}"
         )
-        print(f"{bars}| {' ' * len(hex_str)} {short_message}")
-        print(f"{bars}| ")
+        print(f"{indent}| {' ' * len(hex_str)} {short_message}")
+        print(f"{indent}| ")
 
 
 @dataclass
