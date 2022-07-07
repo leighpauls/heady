@@ -97,10 +97,10 @@ def main() -> None:
     commands.add_subparser(
         "pr",
         help="Provide link to create stacked PR.",
-        execute=lambda r, args: print_pr_links(r, args.rev),
+        execute=lambda r, args: print_pr_links(r, args.rev, args.recursive),
     ).add_argument(
         "rev", type=str, nargs="?", default="HEAD", help="Commit to create the PR of."
-    )
+    ).add_argument('--recursive', '-r', default=False, action='store_true')
 
     commands.add_subparser(
         "autohide",
@@ -288,37 +288,44 @@ def push_commits(r: HeadyRepo, rev: str) -> None:
     r.repo.git.push(r.remote, *push_order, force_with_lease=True, no_verify=True)
 
 
-def print_pr_links(r: HeadyRepo, rev: str) -> None:
+def print_pr_links(r: HeadyRepo, rev: str, recursive: bool) -> None:
     t = tree.build_tree(r)
     target_commit = r.repo.commit(rev)
     target_node = t.commit_nodes.get(target_commit.hexsha)
     if not target_node:
         raise ValueError(f"Could not find {rev} in tree.")
-    if not target_node.upstreams:
+    if not target_node.upstreams and not recursive:
         raise ValueError(f"Rev {rev} has no associated upstream branches.")
 
-    parent_commit_sha = target_commit.parents[0].hexsha
+    _print_links_for_node(r, t, target_node, recursive)
+
+
+def _print_links_for_node(r: HeadyRepo, t: tree.HeadyTree, target_node: tree.CommitNode, recursive: bool):
+    parent_commit_sha = target_node.commit.parents[0].hexsha
 
     if is_in_trunk(r, parent_commit_sha):
         for upstream in target_node.upstreams:
             print(
                 f"https://github.com/Nextdoor/nextdoor.com/compare/{upstream.name}?expand=1"
             )
-        return
-
-    parent_commit_node = t.commit_nodes.get(parent_commit_sha)
-    if not parent_commit_node:
-        raise ValueError(f"Couldn't find suitable base branch from {parent_commit_sha}")
-    if not parent_commit_node.upstreams:
-        raise ValueError(
-            f"Parent commit {parent_commit_sha} has no associated upstream branches."
-        )
-
-    for upstream in target_node.upstreams:
-        for parent_upstream in parent_commit_node.upstreams:
-            print(
-                f"https://github.com/Nextdoor/nextdoor.com/compare/{parent_upstream.name}...{upstream.name}?expand=1"
+    else:
+        parent_commit_node = t.commit_nodes.get(parent_commit_sha)
+        if not parent_commit_node:
+            raise ValueError(f"Couldn't find suitable base branch from {parent_commit_sha}")
+        if not parent_commit_node.upstreams:
+            raise ValueError(
+                f"Parent commit {parent_commit_sha} has no associated upstream branches."
             )
+
+        for upstream in target_node.upstreams:
+            for parent_upstream in parent_commit_node.upstreams:
+                print(
+                    f"https://github.com/Nextdoor/nextdoor.com/compare/{parent_upstream.name}...{upstream.name}?expand=1"
+                )
+
+    if recursive:
+        for ch in target_node.children:
+            _print_links_for_node(r, t, ch, True)
 
 
 def auto_hide(r: HeadyRepo) -> None:
