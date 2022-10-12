@@ -43,8 +43,8 @@ class CommitNode:
         self.in_trunk = in_trunk
 
     def print_tree(self) -> None:
-        self._print_many_children('')
-        self._print_self('')
+        self._print_many_children("")
+        self._print_self("")
         print(":")
 
     def _print_tree(self, indent: str) -> None:
@@ -61,13 +61,15 @@ class CommitNode:
         self.children[0]._print_tree(indent)
 
     def _print_many_children(self, indent: str) -> None:
-        sorted_children: List[CommitNode] = list(sorted(
-            self.children, key=lambda node: node.commit.committed_date, reverse=True
-        ))
+        sorted_children: List[CommitNode] = list(
+            sorted(
+                self.children, key=lambda node: node.commit.committed_date, reverse=True
+            )
+        )
         is_first = not self.in_trunk
         for child in sorted_children:
-            new_indent = ' ' if is_first else '|'
-            child._print_tree(indent+new_indent+' ')
+            new_indent = " " if is_first else "|"
+            child._print_tree(indent + new_indent + " ")
             print(indent + new_indent + "/")
             is_first = False
 
@@ -184,7 +186,23 @@ def build_tree(r: HeadyRepo) -> HeadyTree:
             trunk_ref
         )
 
-    # Find ancestors of tips which are not ancestors of trunk
+    # Find tips which can't merge with trunk
+    tips_to_exclude = set()
+    for tip_sha in tip_shas:
+        for trunk_ref in r.trunk_refs:
+            try:
+                r.repo.git.merge_base(tip_sha, trunk_ref)
+            except git.CommandError as e:
+                if e.status != 1:
+                    raise
+                print(
+                    f"Tip {tip_sha} has no merge base with trunk {trunk_ref}. Excluding it."
+                )
+                tips_to_exclude.add(tip_sha)
+                break
+
+    tip_shas.difference_update(tips_to_exclude)
+
     rev_list_cmds = list(tip_shas) + [f"^{trunk_ref}" for trunk_ref in r.trunk_refs]
     rev_list_output = r.repo.git.rev_list(*rev_list_cmds)
     branch_commit_shas = set(rev_list_output.split("\n")) if rev_list_output else set()
@@ -243,7 +261,11 @@ def build_tree(r: HeadyRepo) -> HeadyTree:
 
     # link the node objects
     for node in commit_nodes.values():
-        parent_commit = node.commit.parents[0]
+        try:
+            parent_commit = node.commit.parents[0]
+        except:
+            print(f"Error finding parent of {node.commit}")
+            raise
         parent_sha = parent_commit.hexsha
         if parent_sha not in commit_nodes:
             if parent_sha not in trunk_nodes:
