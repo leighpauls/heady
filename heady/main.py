@@ -71,18 +71,6 @@ def main() -> None:
     )
 
     commands.add_subparser(
-        "upstream",
-        help="Add an upstream branch to the commit.",
-        execute=lambda r, args: add_upstream(r, args.upstream_ref, args.rev),
-    ).add_argument(
-        "upstream_ref",
-        type=str,
-        help="The upstream branch name to target.",
-    ).add_argument(
-        "rev", type=str, default="HEAD", nargs="?", help="The local revision to label."
-    )
-
-    commands.add_subparser(
         "push",
         help="Push commits with upstreams in the specified subtree.",
         execute=lambda r, args: push_commits(r, args.rev),
@@ -100,7 +88,9 @@ def main() -> None:
         execute=lambda r, args: print_pr_links(r, args.rev, args.recursive),
     ).add_argument(
         "rev", type=str, nargs="?", default="HEAD", help="Commit to create the PR of."
-    ).add_argument('--recursive', '-r', default=False, action='store_true')
+    ).add_argument(
+        "--recursive", "-r", default=False, action="store_true"
+    )
 
     commands.add_subparser(
         "autohide",
@@ -300,7 +290,9 @@ def print_pr_links(r: HeadyRepo, rev: str, recursive: bool) -> None:
     _print_links_for_node(r, t, target_node, recursive)
 
 
-def _print_links_for_node(r: HeadyRepo, t: tree.HeadyTree, target_node: tree.CommitNode, recursive: bool):
+def _print_links_for_node(
+    r: HeadyRepo, t: tree.HeadyTree, target_node: tree.CommitNode, recursive: bool
+):
     parent_commit_sha = target_node.commit.parents[0].hexsha
 
     if is_in_trunk(r, parent_commit_sha):
@@ -311,7 +303,9 @@ def _print_links_for_node(r: HeadyRepo, t: tree.HeadyTree, target_node: tree.Com
     else:
         parent_commit_node = t.commit_nodes.get(parent_commit_sha)
         if not parent_commit_node:
-            raise ValueError(f"Couldn't find suitable base branch from {parent_commit_sha}")
+            raise ValueError(
+                f"Couldn't find suitable base branch from {parent_commit_sha}"
+            )
         if not parent_commit_node.upstreams:
             raise ValueError(
                 f"Parent commit {parent_commit_sha} has no associated upstream branches."
