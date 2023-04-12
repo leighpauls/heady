@@ -1,0 +1,7 @@
+[package]
+name = "heady-rust"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+git2 = { version = "0.17.0", features = ["vendored-libgit2", "vendored-openssl"] }
