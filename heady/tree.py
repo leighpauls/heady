@@ -139,7 +139,7 @@ class HeadyTree:
 def build_tree(r: HeadyRepo) -> HeadyTree:
     reflog: git.RefLog = r.repo.head.log()
     cur_time = datetime.datetime.now()
-    max_age = datetime.timedelta(days=14)
+    max_age = datetime.timedelta(weeks=4)
 
     hide_list_shas = config.get_hide_list(r.repo)
     tip_shas = set()
