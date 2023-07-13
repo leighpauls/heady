@@ -1,3 +1,4 @@
+import re
 from pprint import pprint
 from typing import List, Optional, Set
 
@@ -295,11 +296,17 @@ def _print_links_for_node(
 ):
     parent_commit_sha = target_node.commit.parents[0].hexsha
 
+    remote_url = r.repo.remote("origin").url
+    match = re.match(r".*github.com:(.+/.+?)(\.git)?$", remote_url)
+
+    if match is None:
+        raise ValueError(f"Could not parse remote url {remote_url}")
+
+    gh_repo_name = match[1]
+
     if is_in_trunk(r, parent_commit_sha):
         for upstream in target_node.upstreams:
-            print(
-                f"https://github.com/Nextdoor/nextdoor.com/compare/{upstream.name}?expand=1"
-            )
+            print(f"https://github.com/{gh_repo_name}/compare/{upstream.name}?expand=1")
     else:
         parent_commit_node = t.commit_nodes.get(parent_commit_sha)
         if not parent_commit_node:
@@ -314,7 +321,7 @@ def _print_links_for_node(
         for upstream in target_node.upstreams:
             for parent_upstream in parent_commit_node.upstreams:
                 print(
-                    f"https://github.com/Nextdoor/nextdoor.com/compare/{parent_upstream.name}...{upstream.name}?expand=1"
+                    f"https://github.com/{gh_repo_name}/compare/{parent_upstream.name}...{upstream.name}?expand=1"
                 )
 
     if recursive:
